@@ -40,7 +40,8 @@ It runs on whatever account Claude Code is signed in with. Skill source:
 [`plugins/owlmap/skills/map/SKILL.md`](plugins/owlmap/skills/map/SKILL.md).
 
 Without the marketplace: copy `plugins/owlmap/skills/map/` to
-`~/.claude/skills/owlmap/` and run it as `/owlmap`.
+`~/.claude/skills/owlmap/`, change `name: map` to `name: owlmap` in its
+`SKILL.md`, and run it as `/owlmap`.
 
 ## Landing page
 
