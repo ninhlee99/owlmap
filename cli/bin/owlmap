@@ -1,0 +1,84 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+Encoding.default_external = Encoding::UTF_8
+require "optparse"
+require_relative "../lib/owlmap"
+
+config = Owlmap::Config.default
+dry_run = false
+
+parser = OptionParser.new do |o|
+  o.banner = <<~TXT
+    OwlMap #{Owlmap::VERSION} — turn a codebase into a navigable map.
+
+    Usage: owlmap <github-url | local-folder> [options]
+
+    Examples:
+      owlmap https://github.com/sinatra/sinatra
+      owlmap ../my-rails-app --out docs/owlmap
+      owlmap https://github.com/rack/rack --dry-run
+
+    Options:
+  TXT
+  o.on("-o", "--out DIR", "Where to write the docs (default: owlmap-docs/<repo>)") { |v| config.out_dir = v }
+  o.on("--dry-run", "Scan and estimate cost without calling the API") { dry_run = true }
+  o.on("--max-files N", Integer, "Refuse repos with more source files (default #{config.max_files})") { |v| config.max_files = v }
+  o.on("--max-input-tokens N", Integer, "Abort if the estimate is higher (default #{config.max_input_tokens})") { |v| config.max_input_tokens = v }
+  o.on("--concurrency N", Integer, "Parallel module summaries (default #{config.concurrency})") { |v| config.concurrency = v.clamp(1, 16) }
+  o.on("--fast-model ID", "Model for module summaries (default #{config.fast_model})") { |v| config.fast_model = v }
+  o.on("--smart-model ID", "Model for the overview documents (default #{config.smart_model})") { |v| config.smart_model = v }
+  o.on("-v", "--version") { puts Owlmap::VERSION; exit }
+  o.on("-h", "--help") { puts o; exit }
+end
+
+begin
+  parser.parse!
+rescue OptionParser::ParseError => e
+  warn e.message
+  warn parser
+  exit 64
+end
+
+if ARGV.size != 1
+  warn parser
+  exit 64
+end
+
+source = nil
+begin
+  source = Owlmap::RepoSource.resolve(ARGV.first)
+  warn "Reading #{source.url || source.path}#{source.commit ? " @ #{source.commit[0, 12]}" : ''}"
+
+  client = dry_run ? nil : Owlmap::ClaudeClient.new
+  analyzer = Owlmap::Analyzer.new(root: source.path, repo_name: source.name, config: config, client: client)
+  plan = analyzer.plan
+
+  warn "#{plan.files.size} source files in #{plan.modules.size} modules " \
+       "(skipped: #{plan.skipped.map { |k, v| "#{v} #{k}" }.join(', ').then { |s| s.empty? ? 'none' : s }})"
+  warn "Estimated input: ~#{plan.estimated_input_tokens} tokens"
+
+  if dry_run
+    plan.modules.each do |m|
+      warn format("  %-40s %4d files  ~%d tokens", m.name, m.files.size, Owlmap.estimate_tokens(m.bytes))
+    end
+    exit 0
+  end
+
+  result = analyzer.run
+  out_dir = config.out_dir == "owlmap-docs" ? File.join("owlmap-docs", source.name) : config.out_dir
+  Owlmap::Writer.new(out_dir: out_dir, source: source, config: config, usage: client.usage).write(result)
+
+  u = client.usage
+  warn "Done: #{File.expand_path(out_dir)}"
+  warn "API usage: #{u.calls} calls, #{u.input_tokens} input + #{u.cache_read_tokens} cached + #{u.output_tokens} output tokens"
+  warn "#{result.failures.size} module(s) failed: #{result.failures.join(', ')}" if result.failures.any?
+rescue Owlmap::Error => e
+  warn "owlmap: #{e.message}"
+  exit 1
+rescue Interrupt
+  warn "\nowlmap: cancelled"
+  exit 130
+ensure
+  source&.cleanup
+end

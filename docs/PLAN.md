@@ -2,6 +2,13 @@
 
 > Cập nhật: 08/10/2026 · Chủ dự án: Ninh Lee
 
+## Tiến độ
+
+- [x] Landing page lên Vercel: https://owlmap-ninh-le-projects.vercel.app
+- [x] Lõi phân tích dạng CLI (Ruby, `cli/`): clone repo → lọc file → chia module → Claude tóm tắt → viết ARCHITECTURE / FLOWS / ONBOARDING / modules. 18 test offline đều qua; dry-run trên Sinatra: 219 file, 10 module, ~188k token đầu vào.
+- [ ] Chạy thật lần đầu với API key, chấm chất lượng trên 3–5 repo, tinh chỉnh prompt
+- [ ] Web MVP (tuần 4)
+
 ## 1. Tóm tắt
 
 **OwlMap** biến một codebase thiếu tài liệu thành bản đồ dễ hiểu: tổng quan kiến trúc, sơ đồ luồng chính, ghi chú từng module và hướng dẫn onboarding — sinh tự động bằng Claude.
@@ -40,7 +47,7 @@
 
 | Thành phần | Lựa chọn gợi ý | Ghi chú |
 |---|---|---|
-| Backend | Rails (API mode) hoặc Node/TypeScript | Chọn stack bạn quen nhất để làm nhanh |
+| Backend | Ruby (đã chọn) — lõi CLI thuần thư viện chuẩn; web MVP dự kiến Rails | Chọn stack bạn quen nhất để làm nhanh |
 | Hàng đợi job | Sidekiq / BullMQ | Phân tích repo mất vài phút, không chạy trong request |
 | Frontend | Trang tĩnh + JS, hoặc Next.js | Render Markdown (marked) + Mermaid |
 | AI | Claude API (Claude Console) | Dùng model mạnh cho bước tổng hợp, model nhanh/rẻ cho bước tóm tắt module |

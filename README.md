@@ -2,13 +2,14 @@
 
 **Turn undocumented codebases into a navigable map.** OwlMap reads a repository with Claude and writes an architecture overview, flow diagrams, per-module notes and an onboarding guide.
 
-> Status: pre-MVP. This repo currently holds the landing page and the project plan.
+> Status: pre-MVP. Landing page is live at https://owlmap-ninh-le-projects.vercel.app and the analysis CLI works end to end (tested offline; first live API run pending).
 
 ## Repository layout
 
 ```
 owlmap/
-├── landing/index.html   # Static landing page (EN/VI), deployable as-is
+├── cli/                 # Analysis core: repo → Markdown docs via the Claude API (see cli/README.md)
+├── landing/index.html   # Static landing page (EN/VI), deployed on Vercel
 ├── docs/PLAN.md         # Product, MVP scope, roadmap, business registration, startup program
 └── README.md
 ```
@@ -47,6 +48,7 @@ See [`docs/PLAN.md`](docs/PLAN.md) for the MVP scope, technical approach, 6-week
 
 - [ ] Buy domain and set up domain email
 - [ ] Connect the waitlist form
-- [ ] CLI prototype: repo URL → Markdown docs
+- [x] CLI prototype: repo URL → Markdown docs
+- [ ] First live run with an API key; tune prompts
 - [ ] Quality test set of 5–10 open-source repositories
 - [ ] Web MVP and first 5–10 pilot users
