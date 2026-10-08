@@ -1,0 +1,571 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OwlMap</title>
+<meta name="description" content="OwlMap reads your repository and writes the architecture overview, flow diagrams, module notes and onboarding guide your team never had time to write.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,700;12..96,800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231A2A44'/%3E%3Ccircle cx='11' cy='15' r='5' fill='%23E3A23A'/%3E%3Ccircle cx='21' cy='15' r='5' fill='%23E3A23A'/%3E%3Ccircle cx='11' cy='15' r='2' fill='%231A2A44'/%3E%3Ccircle cx='21' cy='15' r='2' fill='%231A2A44'/%3E%3C/svg%3E">
+<style>
+:root {
+  --paper: #E7EDF1;
+  --paper-2: #DCE4EA;
+  --sheet: #F6F8FA;
+  --ink: #1A2A44;
+  --ink-soft: #4A5B72;
+  --contour: #B3C1CE;
+  --amber: #E3A23A;
+  --amber-ink: #8A5A0E;
+  --moss: #3F6E57;
+  --focus: #2D63C8;
+  --radius-lg: 18px;
+  --radius-sm: 8px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #14203A;
+    --paper-2: #1B2946;
+    --sheet: #1F2E4E;
+    --ink: #E6ECF3;
+    --ink-soft: #A7B6C9;
+    --contour: #34466A;
+    --amber: #F0B252;
+    --amber-ink: #F0B252;
+    --moss: #7FB596;
+    --focus: #8DB2FF;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #14203A; --paper-2: #1B2946; --sheet: #1F2E4E; --ink: #E6ECF3; --ink-soft: #A7B6C9;
+  --contour: #34466A; --amber: #F0B252; --amber-ink: #F0B252; --moss: #7FB596; --focus: #8DB2FF; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "Bricolage Grotesque", system-ui, sans-serif;
+  font-size: 1.0625rem;
+  line-height: 1.6;
+  font-optical-sizing: auto;
+}
+a { color: inherit; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; border-radius: 4px; }
+.wrap { width: min(1120px, 100% - 32px); margin-inline: auto; }
+
+/* Header */
+.top { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-block: 22px; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 1.3rem; letter-spacing: -0.02em; text-decoration: none; }
+.top-actions { display: flex; align-items: center; gap: 8px; }
+.lang { display: inline-flex; border: 1.5px solid var(--contour); border-radius: 999px; padding: 3px; }
+.lang button { font: inherit; font-size: 0.85rem; font-weight: 500; border: 0; background: none; color: var(--ink-soft); padding: 4px 10px; border-radius: 999px; cursor: pointer; }
+.lang button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+.btn {
+  font: inherit; font-weight: 700; font-size: 0.98rem;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 12px 20px; border-radius: 999px; border: 0; cursor: pointer; text-decoration: none;
+  background: var(--ink); color: var(--paper);
+}
+.btn:hover { background: color-mix(in oklab, var(--ink) 88%, var(--amber)); }
+.btn-small { padding: 8px 16px; font-size: 0.9rem; }
+
+/* Hero */
+.hero { display: grid; grid-template-columns: 1fr 1.05fr; gap: 48px; align-items: center; padding-block: 40px 88px; }
+.hero h1 {
+  font-size: clamp(2.4rem, 5.4vw, 4.3rem); line-height: 1.02; letter-spacing: -0.035em;
+  font-weight: 800; margin: 0 0 22px; max-width: 13ch;
+}
+.lede { font-size: 1.2rem; color: var(--ink-soft); max-width: 46ch; margin: 0 0 30px; }
+.hero-form { display: flex; gap: 8px; max-width: 460px; flex-wrap: wrap; }
+.hero-form input {
+  flex: 1 1 220px; min-width: 0; font: inherit; padding: 12px 18px; border-radius: 999px;
+  border: 1.5px solid var(--contour); background: var(--sheet); color: var(--ink);
+}
+.hero-note { font-size: 0.9rem; color: var(--ink-soft); margin-top: 12px; }
+
+/* Map */
+.map { position: relative; background: var(--sheet); border-radius: var(--radius-lg); border: 1.5px solid var(--contour); overflow: hidden; }
+.map svg { display: block; width: 100%; height: auto; }
+.map .contour { fill: none; stroke: var(--contour); stroke-width: 1.2; }
+.map .road { fill: none; stroke: var(--contour); stroke-width: 2; stroke-dasharray: 2 6; stroke-linecap: round; }
+.map .trail { fill: none; stroke: var(--amber); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 520; stroke-dashoffset: 520; }
+.map .node rect { fill: var(--paper); stroke: var(--contour); stroke-width: 1.5; transition: fill .4s, stroke .4s; }
+.map .node text { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 12px; fill: var(--ink); }
+.map .node.lit rect { fill: color-mix(in oklab, var(--amber) 22%, var(--sheet)); stroke: var(--amber); }
+.map-legend {
+  margin: 0 16px 16px;
+  background: var(--paper); border: 1.5px solid var(--contour); border-radius: 12px; padding: 12px 14px;
+  font-size: 0.92rem; opacity: 0; transform: translateY(6px); transition: opacity .5s, transform .5s;
+}
+.map-legend.show { opacity: 1; transform: none; }
+.map-legend strong { display: block; font-size: 0.95rem; }
+.map-legend code { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 0.8rem; color: var(--ink-soft); }
+.map.animate .trail { animation: draw 2.6s .5s ease-in-out forwards; }
+
+@keyframes draw { to { stroke-dashoffset: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .map .trail { stroke-dashoffset: 0; }
+  .map.animate .trail { animation: none; }
+  .map-legend { transition: none; }
+}
+
+/* Sections */
+section { padding-block: 72px; }
+.section-head { max-width: 640px; margin-bottom: 36px; }
+h2 { font-size: clamp(1.8rem, 3.4vw, 2.6rem); line-height: 1.1; letter-spacing: -0.025em; font-weight: 800; margin: 0 0 12px; }
+.section-head p { color: var(--ink-soft); margin: 0; }
+.band { background: var(--paper-2); }
+
+/* Output preview */
+.preview { display: grid; grid-template-columns: 240px 1fr; background: var(--sheet); border: 1.5px solid var(--contour); border-radius: var(--radius-lg); overflow: hidden; }
+.tabs { display: flex; flex-direction: column; padding: 14px; gap: 4px; border-right: 1.5px solid var(--contour); background: var(--paper); }
+.tabs button {
+  font: inherit; text-align: left; border: 0; background: none; color: var(--ink); cursor: pointer;
+  padding: 10px 12px; border-radius: var(--radius-sm); display: grid; gap: 1px;
+}
+.tabs button span { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 0.78rem; color: var(--ink-soft); }
+.tabs button b { font-weight: 700; }
+.tabs button[aria-selected="true"] { background: var(--sheet); box-shadow: inset 3px 0 0 var(--amber); }
+.panel { padding: 30px 34px; min-height: 360px; }
+.panel h3 { margin: 0 0 6px; font-size: 1.35rem; letter-spacing: -0.015em; }
+.panel .intro { color: var(--ink-soft); margin: 0 0 20px; max-width: 60ch; }
+.doc { border-left: 3px solid var(--contour); padding-left: 18px; font-size: 0.98rem; }
+.doc p { margin: 0 0 10px; }
+.doc ul { margin: 0 0 10px; padding-left: 20px; }
+.doc code { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 0.85em; background: var(--paper); padding: 1px 6px; border-radius: 5px; }
+.flow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0 12px; }
+.flow span { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 0.8rem; padding: 6px 10px; border-radius: var(--radius-sm); border: 1.5px solid var(--contour); background: var(--paper); }
+.flow i { font-style: normal; color: var(--amber-ink); font-weight: 700; }
+.risk { color: var(--amber-ink); font-weight: 500; }
+[hidden] { display: none !important; }
+
+/* Steps */
+.steps { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 32px; counter-reset: s; }
+.steps li { counter-increment: s; border-top: 2px solid var(--ink); padding-top: 18px; }
+.steps li::before { content: counter(s); display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--amber); color: #1A2A44; font-weight: 800; margin-bottom: 14px; }
+.steps h3 { margin: 0 0 6px; font-size: 1.2rem; }
+.steps p { margin: 0; color: var(--ink-soft); }
+
+/* Audience + privacy */
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; }
+.plain { list-style: none; margin: 0; padding: 0; }
+.plain li { padding: 16px 0; border-bottom: 1.5px solid var(--contour); }
+.plain li:first-child { border-top: 1.5px solid var(--contour); }
+.plain b { display: block; }
+.plain span { color: var(--ink-soft); }
+
+/* Waitlist */
+.waitlist { background: var(--ink); color: var(--paper); border-radius: 28px; padding: clamp(28px, 5vw, 56px); display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: start; }
+.waitlist h2 { color: var(--paper); }
+.waitlist p { color: color-mix(in oklab, var(--paper) 78%, var(--ink)); }
+.form { display: grid; gap: 14px; }
+.form label { display: grid; gap: 6px; font-weight: 500; font-size: 0.95rem; }
+.form input, .form select {
+  font: inherit; padding: 12px 14px; border-radius: 12px; border: 1.5px solid color-mix(in oklab, var(--paper) 30%, var(--ink));
+  background: color-mix(in oklab, var(--paper) 8%, var(--ink)); color: var(--paper);
+}
+.form .btn { background: var(--amber); color: #1A2A44; justify-self: start; }
+.form .btn:hover { background: color-mix(in oklab, var(--amber) 85%, white); }
+.form-msg { min-height: 1.6em; font-size: 0.95rem; margin: 0; }
+.waitlist :focus-visible { outline-color: var(--amber); }
+
+footer { padding-block: 40px 56px; color: var(--ink-soft); font-size: 0.92rem; display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+
+@media (max-width: 900px) {
+  .hero { grid-template-columns: 1fr; padding-top: 16px; gap: 36px; }
+  .preview { grid-template-columns: 1fr; }
+  .tabs { flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1.5px solid var(--contour); }
+  .tabs button { flex: 0 0 auto; }
+  .tabs button[aria-selected="true"] { box-shadow: inset 0 -3px 0 var(--amber); }
+  .panel { padding: 22px 20px; }
+  .steps, .split, .waitlist { grid-template-columns: 1fr; }
+  .steps { gap: 28px; }
+  section { padding-block: 56px; }
+}
+@media (max-width: 480px) {
+  .top .btn-small { display: none; }
+  .map-legend { margin: 0 12px 12px; }
+}
+</style>
+</head>
+<body>
+
+<header class="wrap top">
+  <a class="brand" href="#" aria-label="OwlMap home">
+    <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
+      <path d="M6 9 L10 4 L13 8 L21 8 L24 4 L28 9 L28 22 Q28 31 17 31 Q6 31 6 22 Z" fill="var(--ink)"/>
+      <circle cx="12" cy="16" r="5" fill="var(--amber)"/><circle cx="22" cy="16" r="5" fill="var(--amber)"/>
+      <circle cx="12" cy="16" r="2" fill="var(--ink)"/><circle cx="22" cy="16" r="2" fill="var(--ink)"/>
+      <path d="M15.5 21 L17 23.5 L18.5 21 Z" fill="var(--amber)"/>
+    </svg>
+    OwlMap
+  </a>
+  <div class="top-actions">
+    <div class="lang" role="group" aria-label="Language">
+      <button type="button" data-lang="en" aria-pressed="true">EN</button>
+      <button type="button" data-lang="vi" aria-pressed="false">VI</button>
+    </div>
+    <a class="btn btn-small" href="#waitlist" data-i18n="nav_cta">Join the beta</a>
+  </div>
+</header>
+
+<main>
+  <div class="wrap hero">
+    <div>
+      <h1 data-i18n="hero_title">See your codebase in the dark.</h1>
+      <p class="lede" data-i18n="hero_lede">OwlMap reads your repository and writes the architecture overview, flow diagrams, module notes and onboarding guide your team never had time to write.</p>
+      <form class="hero-form" data-form="hero" novalidate>
+        <label class="sr" for="hero-email" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)" data-i18n="label_email">Work email</label>
+        <input id="hero-email" name="email" type="email" autocomplete="email" required data-i18n-ph="ph_email" placeholder="you@company.com">
+        <button class="btn" type="submit" data-i18n="hero_cta">Join the beta</button>
+      </form>
+      <p class="hero-note" data-msg="hero" data-i18n="hero_note">Free during the beta. Public GitHub repositories first.</p>
+    </div>
+
+    <figure class="map" id="map" aria-labelledby="map-cap" style="margin:0">
+      <svg viewBox="0 30 560 310" role="img" aria-hidden="true">
+        <path class="contour" d="M-20 80 C 90 40, 180 120, 300 70 S 520 30, 600 90"/>
+        <path class="contour" d="M-20 130 C 100 95, 200 170, 320 120 S 520 85, 600 140"/>
+        <path class="contour" d="M-20 330 C 120 300, 210 370, 330 330 S 500 290, 600 340"/>
+        <path class="contour" d="M-20 380 C 110 350, 230 410, 350 375 S 520 340, 600 390"/>
+        <ellipse class="contour" cx="430" cy="235" rx="90" ry="46"/>
+        <ellipse class="contour" cx="430" cy="235" rx="56" ry="26"/>
+
+        <path class="road" d="M120 80 L120 170 L300 170 L300 250 L440 250"/>
+        <path class="road" d="M300 170 L440 110"/>
+        <path class="road" d="M120 170 L120 290 L300 290"/>
+        <path class="road" d="M300 250 L300 290"/>
+
+        <path class="trail" d="M120 80 L120 170 L300 170 L300 250 L440 250"/>
+
+        <g class="node" data-step="0"><rect x="52" y="62" width="136" height="36" rx="8"/><text x="66" y="85">config/routes</text></g>
+        <g class="node" data-step="1"><rect x="40" y="152" width="160" height="36" rx="8"/><text x="54" y="175">SessionsController</text></g>
+        <g class="node" data-step="2"><rect x="250" y="152" width="100" height="36" rx="8"/><text x="266" y="175">User</text></g>
+        <g class="node" data-step="3"><rect x="232" y="232" width="136" height="36" rx="8"/><text x="246" y="255">AuthService</text></g>
+        <g class="node" data-step="4"><rect x="384" y="232" width="122" height="36" rx="8"/><text x="398" y="255">SessionStore</text></g>
+        <g class="node"><rect x="388" y="92" width="118" height="36" rx="8"/><text x="402" y="115">MailerJob</text></g>
+        <g class="node"><rect x="52" y="272" width="136" height="36" rx="8"/><text x="66" y="295">lib/billing</text></g>
+        <g class="node"><rect x="232" y="272" width="136" height="36" rx="8"/><text x="246" y="295">Invoice</text></g>
+      </svg>
+      <figcaption class="map-legend" id="map-cap">
+        <strong data-i18n="map_title">Login flow, traced</strong>
+        <code>routes → SessionsController#create → User.authenticate → AuthService → SessionStore</code>
+      </figcaption>
+    </figure>
+  </div>
+
+  <section class="band" id="outputs">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 data-i18n="out_title">Four documents, written from your code</h2>
+        <p data-i18n="out_lede">Each one answers a question a new teammate would otherwise ask in chat. This sample is from a small Rails app.</p>
+      </div>
+
+      <div class="preview">
+        <div class="tabs" role="tablist" aria-label="Generated documents">
+          <button role="tab" id="t-arch" aria-controls="p-arch" aria-selected="true"><span>ARCHITECTURE.md</span><b data-i18n="tab_arch">How it fits together</b></button>
+          <button role="tab" id="t-flow" aria-controls="p-flow" aria-selected="false" tabindex="-1"><span>FLOWS.md</span><b data-i18n="tab_flow">What happens when</b></button>
+          <button role="tab" id="t-mod" aria-controls="p-mod" aria-selected="false" tabindex="-1"><span>modules/*.md</span><b data-i18n="tab_mod">What each part does</b></button>
+          <button role="tab" id="t-onb" aria-controls="p-onb" aria-selected="false" tabindex="-1"><span>ONBOARDING.md</span><b data-i18n="tab_onb">Where to start</b></button>
+        </div>
+
+        <div class="panel" role="tabpanel" id="p-arch" aria-labelledby="t-arch" tabindex="0">
+          <h3 data-i18n="arch_h">Architecture overview</h3>
+          <p class="intro" data-i18n="arch_i">The big picture: main components, how data moves between them, and the outside services they depend on.</p>
+          <div class="doc">
+            <p data-i18n="arch_p1">A monolithic Rails app with three areas: accounts, billing and notifications.</p>
+            <ul>
+              <li data-i18n-html="arch_l1">Requests enter through <code>config/routes.rb</code> and are handled by controllers under <code>app/controllers</code>.</li>
+              <li data-i18n-html="arch_l2">Business rules live in <code>app/services</code>, not in models.</li>
+              <li data-i18n-html="arch_l3">Background work runs on Sidekiq: <code>MailerJob</code>, <code>InvoiceJob</code>.</li>
+              <li data-i18n="arch_l4">External services: Stripe (payments), SendGrid (email), S3 (uploads).</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="panel" role="tabpanel" id="p-flow" aria-labelledby="t-flow" tabindex="0" hidden>
+          <h3 data-i18n="flow_h">Key flows</h3>
+          <p class="intro" data-i18n="flow_i">Step-by-step traces of the paths that matter most, with a diagram you can paste into any Markdown viewer.</p>
+          <div class="doc">
+            <p><b data-i18n="flow_name">Signing in</b></p>
+            <div class="flow"><span>POST /login</span><i>→</i><span>SessionsController#create</span><i>→</i><span>User.authenticate</span><i>→</i><span>AuthService</span><i>→</i><span>SessionStore</span></div>
+            <p data-i18n="flow_p">Failed attempts are counted in Redis; after five, the account is locked for 15 minutes.</p>
+          </div>
+        </div>
+
+        <div class="panel" role="tabpanel" id="p-mod" aria-labelledby="t-mod" tabindex="0" hidden>
+          <h3><code style="font-family:'JetBrains Mono',monospace;font-size:1rem">lib/billing</code></h3>
+          <p class="intro" data-i18n="mod_i">One note per module: its job, what it depends on, and what to be careful with.</p>
+          <div class="doc">
+            <p data-i18n="mod_p1">Creates invoices at the end of each billing period and retries failed charges.</p>
+            <p data-i18n-html="mod_p2">Depends on <code>Stripe</code>, <code>Invoice</code>, <code>InvoiceJob</code>.</p>
+            <p class="risk" data-i18n="mod_risk">Careful: tax rates are hard-coded in two places. Change both together.</p>
+          </div>
+        </div>
+
+        <div class="panel" role="tabpanel" id="p-onb" aria-labelledby="t-onb" tabindex="0" hidden>
+          <h3 data-i18n="onb_h">Onboarding guide</h3>
+          <p class="intro" data-i18n="onb_i">A first-day reading order and the questions newcomers usually ask.</p>
+          <div class="doc">
+            <ul>
+              <li data-i18n-html="onb_l1">Read <code>app/services/auth_service.rb</code> first. Most features pass through it.</li>
+              <li data-i18n-html="onb_l2">Run locally: <code>bin/setup</code>, then <code>bin/dev</code>.</li>
+              <li data-i18n="onb_l3">Where are emails defined? In app/mailers, sent from MailerJob.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="how">
+    <div class="wrap">
+      <div class="section-head"><h2 data-i18n="how_title">How it works</h2></div>
+      <ol class="steps">
+        <li><h3 data-i18n="s1_h">Paste a repository link</h3><p data-i18n="s1_p">Any public GitHub repository up to about 500 source files during the beta.</p></li>
+        <li><h3 data-i18n="s2_h">OwlMap reads the code</h3><p data-i18n="s2_p">Claude summarises each module, then pieces together the architecture and main flows. Usually a few minutes.</p></li>
+        <li><h3 data-i18n="s3_h">Read or download the docs</h3><p data-i18n="s3_p">Browse them in OwlMap, or download Markdown files to commit next to your code.</p></li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap split">
+      <div>
+        <h2 data-i18n="who_title">Made for teams that inherit code</h2>
+        <ul class="plain">
+          <li><b data-i18n="w1_b">Tech leads onboarding new developers</b><span data-i18n="w1_s">Give newcomers a map on day one instead of a week of questions.</span></li>
+          <li><b data-i18n="w2_b">Agencies taking over a project</b><span data-i18n="w2_s">Understand a handed-over codebase before quoting the work.</span></li>
+          <li><b data-i18n="w3_b">Offshore teams</b><span data-i18n="w3_s">Share one picture of the system across languages and time zones.</span></li>
+        </ul>
+      </div>
+      <div>
+        <h2 data-i18n="priv_title">Your code stays yours</h2>
+        <ul class="plain">
+          <li><b data-i18n="p1_b">Public repositories only in the beta</b><span data-i18n="p1_s">Private repository support will come with explicit, per-repository permission.</span></li>
+          <li><b data-i18n="p2_b">Deleted after processing</b><span data-i18n="p2_s">The cloned code is removed once your documents are written.</span></li>
+          <li><b data-i18n="p3_b">Not used for training</b><span data-i18n="p3_s">OwlMap uses the Claude API under Anthropic's commercial terms.</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="waitlist">
+    <div class="wrap waitlist">
+      <div>
+        <h2 data-i18n="wl_title">Map your first repository</h2>
+        <p data-i18n="wl_lede">We're inviting a small group of developers to try OwlMap and tell us what's missing. Leave your email and we'll send an invite.</p>
+      </div>
+      <form class="form" data-form="main" novalidate>
+        <label><span data-i18n="label_email">Work email</span>
+          <input name="email" type="email" autocomplete="email" required data-i18n-ph="ph_email" placeholder="you@company.com">
+        </label>
+        <label><span data-i18n="label_role">Your role</span>
+          <select name="role">
+            <option value="developer" data-i18n="r_dev">Developer</option>
+            <option value="lead" data-i18n="r_lead">Tech lead / manager</option>
+            <option value="agency" data-i18n="r_agency">Agency / outsourcing</option>
+            <option value="other" data-i18n="r_other">Something else</option>
+          </select>
+        </label>
+        <label><span data-i18n="label_repo">A repository you'd like mapped (optional)</span>
+          <input name="repo" type="url" inputmode="url" placeholder="https://github.com/…">
+        </label>
+        <button class="btn" type="submit" data-i18n="wl_cta">Request an invite</button>
+        <p class="form-msg" data-msg="main" role="status" aria-live="polite"></p>
+      </form>
+    </div>
+  </section>
+</main>
+
+<footer class="wrap">
+  <span>© 2026 OwlMap</span>
+  <span><a href="mailto:hello@owlmap.dev" data-contact>hello@owlmap.dev</a></span>
+</footer>
+
+<script>
+/* ---- Configuration -------------------------------------------------------
+   FORM_ENDPOINT: paste a Formspree (or similar) endpoint to collect sign-ups,
+   e.g. "https://formspree.io/f/xxxxabcd". While empty, the form opens an
+   email draft to CONTACT_EMAIL instead.                                     */
+const FORM_ENDPOINT = "";
+const CONTACT_EMAIL = "hello@owlmap.dev";
+/* ------------------------------------------------------------------------ */
+
+const I18N = {
+  vi: {
+    nav_cta: "Dùng thử bản beta",
+    hero_title: "Nhìn rõ codebase trong bóng tối.",
+    hero_lede: "OwlMap đọc repository của bạn và viết sẵn tổng quan kiến trúc, sơ đồ luồng, ghi chú từng module và hướng dẫn onboarding — những tài liệu team chưa bao giờ có thời gian viết.",
+    label_email: "Email công việc",
+    ph_email: "ban@congty.com",
+    hero_cta: "Dùng thử bản beta",
+    hero_note: "Miễn phí trong giai đoạn beta. Hỗ trợ repository GitHub public trước.",
+    map_title: "Luồng đăng nhập, đã được lần theo",
+    out_title: "Bốn tài liệu, viết ra từ chính code của bạn",
+    out_lede: "Mỗi tài liệu trả lời một câu hỏi mà người mới vào team sẽ phải hỏi trên chat. Ví dụ dưới đây lấy từ một ứng dụng Rails nhỏ.",
+    tab_arch: "Các phần ghép với nhau ra sao",
+    tab_flow: "Chuyện gì xảy ra khi…",
+    tab_mod: "Mỗi phần làm gì",
+    tab_onb: "Bắt đầu từ đâu",
+    arch_h: "Tổng quan kiến trúc",
+    arch_i: "Bức tranh lớn: các thành phần chính, dữ liệu đi qua chúng thế nào và các dịch vụ bên ngoài mà hệ thống phụ thuộc.",
+    arch_p1: "Ứng dụng Rails nguyên khối gồm ba mảng: tài khoản, thanh toán và thông báo.",
+    arch_l1: "Request đi vào qua <code>config/routes.rb</code> và được xử lý bởi các controller trong <code>app/controllers</code>.",
+    arch_l2: "Logic nghiệp vụ nằm ở <code>app/services</code>, không nằm trong model.",
+    arch_l3: "Tác vụ nền chạy trên Sidekiq: <code>MailerJob</code>, <code>InvoiceJob</code>.",
+    arch_l4: "Dịch vụ ngoài: Stripe (thanh toán), SendGrid (email), S3 (file tải lên).",
+    flow_h: "Các luồng chính",
+    flow_i: "Lần theo từng bước những luồng quan trọng nhất, kèm sơ đồ dán được vào bất kỳ trình xem Markdown nào.",
+    flow_name: "Đăng nhập",
+    flow_p: "Số lần đăng nhập sai được đếm trong Redis; sai quá năm lần, tài khoản bị khoá 15 phút.",
+    mod_i: "Mỗi module một ghi chú: nhiệm vụ, phụ thuộc vào đâu và cần cẩn thận điều gì.",
+    mod_p1: "Tạo hoá đơn vào cuối mỗi kỳ thanh toán và thử lại các lần trừ tiền thất bại.",
+    mod_p2: "Phụ thuộc <code>Stripe</code>, <code>Invoice</code>, <code>InvoiceJob</code>.",
+    mod_risk: "Cẩn thận: thuế suất bị viết cứng ở hai nơi. Sửa thì phải sửa cả hai.",
+    onb_h: "Hướng dẫn onboarding",
+    onb_i: "Thứ tự đọc cho ngày đầu tiên và những câu hỏi người mới hay hỏi.",
+    onb_l1: "Đọc <code>app/services/auth_service.rb</code> trước. Hầu hết tính năng đều đi qua nó.",
+    onb_l2: "Chạy local: <code>bin/setup</code>, rồi <code>bin/dev</code>.",
+    onb_l3: "Email được định nghĩa ở đâu? Trong app/mailers, gửi từ MailerJob.",
+    how_title: "Cách hoạt động",
+    s1_h: "Dán link repository",
+    s1_p: "Bất kỳ repository GitHub public nào, tối đa khoảng 500 file mã nguồn trong giai đoạn beta.",
+    s2_h: "OwlMap đọc code",
+    s2_p: "Claude tóm tắt từng module, rồi ghép lại thành kiến trúc và các luồng chính. Thường mất vài phút.",
+    s3_h: "Đọc hoặc tải tài liệu",
+    s3_p: "Xem ngay trên OwlMap, hoặc tải file Markdown về để commit cạnh code.",
+    who_title: "Dành cho các team phải tiếp quản code",
+    w1_b: "Tech lead đón dev mới",
+    w1_s: "Đưa người mới tấm bản đồ ngay ngày đầu, thay vì một tuần hỏi han.",
+    w2_b: "Agency nhận bàn giao dự án",
+    w2_s: "Hiểu codebase được bàn giao trước khi báo giá.",
+    w3_b: "Team offshore",
+    w3_s: "Cùng nhìn một bức tranh hệ thống dù khác ngôn ngữ và múi giờ.",
+    priv_title: "Code của bạn vẫn là của bạn",
+    p1_b: "Chỉ repository public trong giai đoạn beta",
+    p1_s: "Hỗ trợ repository private sẽ đi kèm quyền cấp rõ ràng cho từng repository.",
+    p2_b: "Xoá sau khi xử lý",
+    p2_s: "Code được clone sẽ bị xoá ngay khi tài liệu được viết xong.",
+    p3_b: "Không dùng để huấn luyện",
+    p3_s: "OwlMap dùng Claude API theo điều khoản thương mại của Anthropic.",
+    wl_title: "Lập bản đồ cho repository đầu tiên",
+    wl_lede: "Chúng tôi đang mời một nhóm nhỏ developer dùng thử OwlMap và góp ý còn thiếu gì. Để lại email, chúng tôi sẽ gửi lời mời.",
+    label_role: "Vai trò của bạn",
+    r_dev: "Developer",
+    r_lead: "Tech lead / quản lý",
+    r_agency: "Agency / outsourcing",
+    r_other: "Khác",
+    label_repo: "Repository bạn muốn lập bản đồ (không bắt buộc)",
+    wl_cta: "Gửi yêu cầu tham gia",
+    msg_ok: "Đã nhận. Chúng tôi sẽ gửi lời mời đến email của bạn.",
+    msg_mail: "Đang mở email để gửi đăng ký của bạn.",
+    msg_bad: "Hãy nhập một địa chỉ email hợp lệ, ví dụ ban@congty.com.",
+    msg_err: "Chưa gửi được. Thử lại, hoặc email cho chúng tôi tại "
+  },
+  en: {
+    msg_ok: "Got it. We'll send an invite to your email.",
+    msg_mail: "Opening your email app to send the request.",
+    msg_bad: "Enter a valid email address, like you@company.com.",
+    msg_err: "That didn't go through. Try again, or email us at "
+  }
+};
+
+/* Capture English defaults from the markup so the page is the source of truth */
+document.querySelectorAll("[data-i18n]").forEach(el => { I18N.en[el.dataset.i18n] ??= el.textContent; });
+document.querySelectorAll("[data-i18n-html]").forEach(el => { I18N.en[el.dataset.i18nHtml] ??= el.innerHTML; });
+document.querySelectorAll("[data-i18n-ph]").forEach(el => { I18N.en[el.dataset.i18nPh] ??= el.placeholder; });
+
+let lang = "en";
+const t = k => (I18N[lang] && I18N[lang][k]) ?? I18N.en[k] ?? "";
+
+function setLang(next) {
+  lang = next in I18N ? next : "en";
+  document.documentElement.lang = lang;
+  document.querySelectorAll("[data-i18n]").forEach(el => { el.textContent = t(el.dataset.i18n); });
+  document.querySelectorAll("[data-i18n-html]").forEach(el => { el.innerHTML = t(el.dataset.i18nHtml); });
+  document.querySelectorAll("[data-i18n-ph]").forEach(el => { el.placeholder = t(el.dataset.i18nPh); });
+  document.querySelectorAll(".lang button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.lang === lang)));
+  try { localStorage.setItem("owlmap-lang", lang); } catch (e) {}
+}
+document.querySelectorAll(".lang button").forEach(b => b.addEventListener("click", () => setLang(b.dataset.lang)));
+let saved = null;
+try { saved = localStorage.getItem("owlmap-lang"); } catch (e) {}
+setLang(saved || ((navigator.language || "").toLowerCase().startsWith("vi") ? "vi" : "en"));
+
+/* Contact address */
+document.querySelectorAll("[data-contact]").forEach(a => { a.href = "mailto:" + CONTACT_EMAIL; a.textContent = CONTACT_EMAIL; });
+
+/* Tabs (WAI-ARIA tabs pattern) */
+const tabs = [...document.querySelectorAll('[role="tab"]')];
+function select(tab, focus) {
+  tabs.forEach(tb => {
+    const on = tb === tab;
+    tb.setAttribute("aria-selected", String(on));
+    tb.tabIndex = on ? 0 : -1;
+    document.getElementById(tb.getAttribute("aria-controls")).hidden = !on;
+  });
+  if (focus) tab.focus();
+}
+tabs.forEach((tb, i) => {
+  tb.addEventListener("click", () => select(tb));
+  tb.addEventListener("keydown", e => {
+    const keys = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 };
+    if (e.key in keys) { e.preventDefault(); select(tabs[(i + keys[e.key] + tabs.length) % tabs.length], true); }
+    if (e.key === "Home") { e.preventDefault(); select(tabs[0], true); }
+    if (e.key === "End") { e.preventDefault(); select(tabs[tabs.length - 1], true); }
+  });
+});
+
+/* Hero map: one orchestrated reveal on load */
+(function () {
+  const map = document.getElementById("map");
+  const nodes = [...map.querySelectorAll(".node[data-step]")].sort((a, b) => a.dataset.step - b.dataset.step);
+  const legend = map.querySelector(".map-legend");
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (reduce) { nodes.forEach(n => n.classList.add("lit")); legend.classList.add("show"); return; }
+  map.classList.add("animate");
+  nodes.forEach((n, i) => setTimeout(() => n.classList.add("lit"), 500 + i * 560));
+  setTimeout(() => legend.classList.add("show"), 500 + nodes.length * 560);
+})();
+
+/* Forms */
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+document.querySelectorAll("form[data-form]").forEach(form => {
+  const msg = document.querySelector(`[data-msg="${form.dataset.form}"]`);
+  form.addEventListener("submit", async e => {
+    e.preventDefault();
+    const data = Object.fromEntries(new FormData(form));
+    const say = text => { msg.textContent = text; msg.removeAttribute("data-i18n"); };
+    if (!EMAIL_RE.test(data.email || "")) { say(t("msg_bad")); form.querySelector('[name="email"]').focus(); return; }
+    data.lang = lang;
+    if (!FORM_ENDPOINT) {
+      const body = Object.entries(data).map(([k, v]) => `${k}: ${v}`).join("\n");
+      window.location.href = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent("OwlMap beta request")}&body=${encodeURIComponent(body)}`;
+      say(t("msg_mail"));
+      return;
+    }
+    const btn = form.querySelector("button[type=submit]");
+    btn.disabled = true;
+    try {
+      const res = await fetch(FORM_ENDPOINT, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify(data) });
+      if (!res.ok) throw new Error(res.status);
+      form.reset();
+      say(t("msg_ok"));
+    } catch (err) {
+      say(t("msg_err") + CONTACT_EMAIL);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+});
+</script>
+</body>
+</html>
