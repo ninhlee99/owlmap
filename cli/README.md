@@ -1,18 +1,44 @@
 # OwlMap CLI
 
-The analysis core of OwlMap: point it at a repository and it writes an
-architecture overview, key flows with Mermaid diagrams, per-module notes and an
-onboarding guide, using the Claude API.
+The analysis core of OwlMap, written in Rust: point it at a repository and it
+writes an architecture overview, key flows with Mermaid diagrams, per-module
+notes and an onboarding guide, using Claude.
 
-Pure Ruby standard library — no gems to install.
+Ships as a single ~4 MB binary with no runtime to install.
 
-## Requirements
+## Install
 
-- Ruby 3.2+
-- `git`
-- One way to reach Claude (see *Backends*):
-  - a Claude API key from the [Claude Console](https://platform.claude.com/), exported as `ANTHROPIC_API_KEY`, or
-  - [Claude Code](https://code.claude.com/docs/en/setup) installed and signed in on your machine
+**Prebuilt binary:** download `owlmap-<platform>` from the
+[Releases](https://github.com/ninhlee99/owlmap/releases) page (built by
+`.github/workflows/cli.yml` for every `v*` tag), make it executable and put it on
+your `PATH`.
+
+**From source** (Rust 1.80+):
+
+```bash
+cargo install --path cli
+```
+
+You also need `git`, and one way to reach Claude (see *Backends*).
+
+## Usage
+
+```bash
+# See what would be read and roughly how many tokens it costs. No Claude calls.
+owlmap https://github.com/sinatra/sinatra --dry-run
+
+# Generate the docs (written to owlmap-docs/<owner>-<repo>/)
+owlmap https://github.com/sinatra/sinatra
+
+# A local folder works too, and is never modified
+owlmap ../my-rails-app --out docs/owlmap
+```
+
+Options: `--out DIR`, `--dry-run`, `--backend auto|api|claude-code`,
+`--max-files N` (default 500), `--max-input-tokens N` (default 600 000),
+`--concurrency N` (default 4, or 2 with Claude Code), `--fast-model ID`,
+`--smart-model ID`. Models can also be set with `OWLMAP_FAST_MODEL` /
+`OWLMAP_SMART_MODEL`. Run `owlmap --help` for details.
 
 ## Backends
 
@@ -24,33 +50,11 @@ Pure Ruby standard library — no gems to install.
 
 The `claude-code` backend runs `claude -p` with no tools, no MCP servers, no
 saved session, in an empty temp folder, sending only the prompt OwlMap builds.
-It defaults to 2 parallel calls to stay within subscription limits.
 
 **Do not use a Claude subscription to serve other people.** Anthropic's terms
 allow Free/Pro/Max logins for ordinary personal use; products and services must
 use API keys, and may not route their users' requests through a plan login
 ([Claude Code legal and compliance](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use)).
-The web version of OwlMap will therefore always use the `api` backend.
-
-## Usage
-
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...      # or skip this and use your Claude Code login
-
-# See what would be read and roughly how many tokens it costs. No API calls.
-cli/bin/owlmap https://github.com/sinatra/sinatra --dry-run
-
-# Generate the docs (written to owlmap-docs/<owner>-<repo>/)
-cli/bin/owlmap https://github.com/sinatra/sinatra
-
-# A local folder works too, and is never modified
-cli/bin/owlmap ../my-rails-app --out docs/owlmap
-```
-
-Options: `--out DIR`, `--dry-run`, `--backend auto|api|claude-code`, `--max-files N` (default 500),
-`--max-input-tokens N` (default 600 000), `--concurrency N` (default 4),
-`--fast-model ID`, `--smart-model ID`. Models can also be set with
-`OWLMAP_FAST_MODEL` / `OWLMAP_SMART_MODEL`.
 
 ## Output
 
@@ -66,28 +70,36 @@ owlmap-docs/<repo>/
 
 ## How it works
 
-1. **Fetch** — public GitHub URLs are shallow-cloned into a temp folder (no
-   credentials, symlinks disabled) and deleted afterwards.
-2. **Scan** — keeps source, config and docs; skips dependencies, build output,
-   lockfiles, binaries, minified files, likely secrets (`.env`, keys) and
-   boilerplate (CHANGELOG, LICENSE…). Symlinks are never followed.
-3. **Group** — files become modules by folder (`app/models`, `lib/foo`…).
-   Large modules are split, tiny ones folded together, and tests are kept
-   apart and read from their first 60 lines only.
-4. **Budget** — the input size is estimated before any API call; the run stops
-   if it exceeds `--max-input-tokens`.
-5. **Summarise** — each module goes to the fast model in parallel and comes
-   back as structured JSON. A failed module is reported, not fatal.
-6. **Synthesise** — the smart model writes the three overview documents from
-   the file tree, manifests and module summaries (raw code is not resent).
+| Step | Source file |
+|---|---|
+| **Fetch** — public GitHub URLs are shallow-cloned into a temp folder (no credentials, symlinks disabled) and deleted afterwards | `src/repo_source.rs` |
+| **Scan** — keeps source, config and docs; skips dependencies, build output, lockfiles, binaries, minified files, likely secrets and boilerplate; never follows symlinks | `src/scanner.rs` |
+| **Group** — files become modules by folder; large ones are split, tiny ones folded, tests kept apart and read from their first 60 lines | `src/grouper.rs` |
+| **Budget** — input size is estimated before any call; the run stops above `--max-input-tokens` | `src/analyzer.rs` |
+| **Summarise** — each module goes to the fast model in parallel threads and comes back as JSON; a failed module is reported, not fatal | `src/analyzer.rs` |
+| **Synthesise** — the smart model writes the three overview documents from the file tree, manifests and summaries (raw code is not resent) | `src/analyzer.rs`, `src/prompts.rs` |
+| **Write** — Markdown files and `owlmap.json` | `src/writer.rs` |
 
-Prompts live in `lib/owlmap/prompts.rb`. They require every claim to be
-grounded in the code and anything inferred to be marked "Unverified:".
+Prompts require every claim to be grounded in the code and anything inferred
+to be marked "Unverified:".
 
-## Tests
+## Performance
+
+Local work (scan + grouping), best of 5 runs, release build:
+
+| Repository | Files | Ruby prototype | Rust |
+|---|---|---|---|
+| sinatra/sinatra | 292 | 148 ms | 8 ms |
+| rails/rails | 5 007 | 321 ms | 44 ms |
+
+End-to-end time is still dominated by Claude's responses (seconds to minutes);
+raise `--concurrency` to shorten it.
+
+## Development
 
 ```bash
-ruby -Icli/lib cli/test/owlmap_test.rb
+cd cli
+cargo test            # 23 offline tests: fake Claude client + stub `claude` executable
+cargo clippy --all-targets
+cargo build --release # target/release/owlmap
 ```
-
-The suite uses a fake Claude client, so it runs offline and costs nothing.

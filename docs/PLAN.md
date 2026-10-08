@@ -5,7 +5,10 @@
 ## Tiến độ
 
 - [x] Landing page lên Vercel: https://owlmap-ninh-le-projects.vercel.app
-- [x] Lõi phân tích dạng CLI (Ruby, `cli/`): clone repo → lọc file → chia module → Claude tóm tắt → viết ARCHITECTURE / FLOWS / ONBOARDING / modules. 18 test offline đều qua; dry-run trên Sinatra: 219 file, 10 module, ~188k token đầu vào.
+- [x] Lõi phân tích dạng CLI (`cli/`): clone repo → lọc file → chia module → Claude tóm tắt → viết ARCHITECTURE / FLOWS / ONBOARDING / modules. Dry-run trên Sinatra: 219 file, 10 module, ~188k token đầu vào.
+- [x] Hai backend: Claude API (`ANTHROPIC_API_KEY`) và Claude Code trên máy (chỉ dùng cá nhân)
+- [x] Plugin Claude Code: lệnh `/owlmap:map`
+- [x] Chuyển CLI từ Ruby sang Rust: một file chạy ~4 MB, kết quả chia module giống hệt bản Ruby, phần xử lý cục bộ nhanh hơn 7–18 lần; 23 test offline; workflow build bản Linux/macOS/Windows khi tạo tag `v*`
 - [ ] Chạy thật lần đầu với API key, chấm chất lượng trên 3–5 repo, tinh chỉnh prompt
 - [ ] Web MVP (tuần 4)
 
@@ -47,7 +50,8 @@
 
 | Thành phần | Lựa chọn gợi ý | Ghi chú |
 |---|---|---|
-| Backend | Ruby (đã chọn) — lõi CLI thuần thư viện chuẩn; web MVP dự kiến Rails | Chọn stack bạn quen nhất để làm nhanh |
+| Lõi phân tích | Rust (đã chọn) — CLI một file chạy, dùng lại được cho web | Phân phối không cần cài runtime |
+| Backend web | Rails (API mode) hoặc Rust (axum) | Rails nhanh làm hơn; Rust dùng chung code với CLI |
 | Hàng đợi job | Sidekiq / BullMQ | Phân tích repo mất vài phút, không chạy trong request |
 | Frontend | Trang tĩnh + JS, hoặc Next.js | Render Markdown (marked) + Mermaid |
 | AI | Claude API (Claude Console) | Dùng model mạnh cho bước tổng hợp, model nhanh/rẻ cho bước tóm tắt module |

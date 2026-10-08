@@ -1,0 +1,57 @@
+name: CLI
+
+on:
+  push:
+    branches: [main]
+    paths: ["cli/**", ".github/workflows/cli.yml"]
+    tags: ["v*"]
+  pull_request:
+    paths: ["cli/**"]
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: cli
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    strategy:
+      matrix:
+        include:
+          - { os: ubuntu-latest,  target: x86_64-unknown-linux-gnu, name: owlmap-linux-x86_64 }
+          - { os: macos-latest,   target: aarch64-apple-darwin,     name: owlmap-macos-arm64 }
+          - { os: macos-13,       target: x86_64-apple-darwin,      name: owlmap-macos-x86_64 }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc,   name: owlmap-windows-x86_64.exe }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - run: cargo build --release --target ${{ matrix.target }}
+        working-directory: cli
+      - name: Rename binary
+        shell: bash
+        run: |
+          src="cli/target/${{ matrix.target }}/release/owlmap"
+          [ -f "$src.exe" ] && src="$src.exe"
+          cp "$src" "${{ matrix.name }}"
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.name }}

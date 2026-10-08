@@ -2,7 +2,7 @@
 
 **Turn undocumented codebases into a navigable map.** OwlMap reads a repository with Claude and writes an architecture overview, flow diagrams, per-module notes and an onboarding guide.
 
-> Status: pre-MVP. Landing page is live at https://owlmap-ninh-le-projects.vercel.app and the analysis CLI works end to end (tested offline; first live API run pending).
+> Status: pre-MVP. Landing page is live at https://owlmap-ninh-le-projects.vercel.app and the analysis CLI (Rust, single binary) works end to end (tested offline; first live run pending).
 
 ## Repository layout
 
@@ -10,7 +10,7 @@
 owlmap/
 ├── .claude-plugin/      # This repo is a Claude Code plugin marketplace
 ├── plugins/owlmap/      # Claude Code plugin: the /owlmap:map skill
-├── cli/                 # Analysis core: repo → Markdown docs via the Claude API (see cli/README.md)
+├── cli/                 # Analysis core in Rust: repo → Markdown docs via Claude (see cli/README.md)
 ├── landing/index.html   # Static landing page (EN/VI), deployed on Vercel
 ├── docs/PLAN.md         # Product, MVP scope, roadmap, business registration, startup program
 └── README.md
