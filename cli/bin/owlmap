@@ -7,6 +7,8 @@ require_relative "../lib/owlmap"
 
 config = Owlmap::Config.default
 dry_run = false
+backend = "auto"
+concurrency_set = false
 
 parser = OptionParser.new do |o|
   o.banner = <<~TXT
@@ -18,14 +20,22 @@ parser = OptionParser.new do |o|
       owlmap https://github.com/sinatra/sinatra
       owlmap ../my-rails-app --out docs/owlmap
       owlmap https://github.com/rack/rack --dry-run
+      owlmap ../my-app --backend claude-code     # use your local Claude Code login
+
+    Backends:
+      api          Claude API with ANTHROPIC_API_KEY (required for any hosted/shared use)
+      claude-code  The `claude` CLI on this machine, signed in with your own account;
+                   for your own runs only
+      auto         api if ANTHROPIC_API_KEY is set, otherwise claude-code (default)
 
     Options:
   TXT
   o.on("-o", "--out DIR", "Where to write the docs (default: owlmap-docs/<repo>)") { |v| config.out_dir = v }
   o.on("--dry-run", "Scan and estimate cost without calling the API") { dry_run = true }
+  o.on("--backend NAME", %w[auto api claude-code], "auto | api | claude-code (default auto)") { |v| backend = v }
   o.on("--max-files N", Integer, "Refuse repos with more source files (default #{config.max_files})") { |v| config.max_files = v }
   o.on("--max-input-tokens N", Integer, "Abort if the estimate is higher (default #{config.max_input_tokens})") { |v| config.max_input_tokens = v }
-  o.on("--concurrency N", Integer, "Parallel module summaries (default #{config.concurrency})") { |v| config.concurrency = v.clamp(1, 16) }
+  o.on("--concurrency N", Integer, "Parallel module summaries (default #{config.concurrency})") { |v| config.concurrency = v.clamp(1, 16); concurrency_set = true }
   o.on("--fast-model ID", "Model for module summaries (default #{config.fast_model})") { |v| config.fast_model = v }
   o.on("--smart-model ID", "Model for the overview documents (default #{config.smart_model})") { |v| config.smart_model = v }
   o.on("-v", "--version") { puts Owlmap::VERSION; exit }
@@ -50,7 +60,18 @@ begin
   source = Owlmap::RepoSource.resolve(ARGV.first)
   warn "Reading #{source.url || source.path}#{source.commit ? " @ #{source.commit[0, 12]}" : ''}"
 
-  client = dry_run ? nil : Owlmap::ClaudeClient.new
+  client = nil
+  unless dry_run
+    backend = ENV["ANTHROPIC_API_KEY"].to_s.empty? ? "claude-code" : "api" if backend == "auto"
+    if backend == "claude-code"
+      client = Owlmap::ClaudeCodeClient.new
+      config.concurrency = 2 unless concurrency_set # be gentle with subscription limits
+      warn "Using Claude Code on this machine (your own account; for personal runs only)"
+    else
+      client = Owlmap::ClaudeClient.new
+      warn "Using the Claude API (ANTHROPIC_API_KEY)"
+    end
+  end
   analyzer = Owlmap::Analyzer.new(root: source.path, repo_name: source.name, config: config, client: client)
   plan = analyzer.plan
 

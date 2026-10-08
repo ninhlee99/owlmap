@@ -271,3 +271,82 @@ class WriterTest < Minitest::Test
     FileUtils.rm_rf(out)
   end
 end
+
+class ClaudeCodeClientTest < Minitest::Test
+  # A fake `claude` executable that records its arguments and answers like print mode.
+  STUB = <<~'RUBY'
+    #!/usr/bin/env ruby
+    require "json"
+    if ARGV == ["--version"]
+      puts "9.9.9 (Claude Code)"
+      exit 0
+    end
+    mode = ENV.fetch("STUB_MODE", "ok")
+    if mode == "old" && ARGV.include?("--safe-mode")
+      warn "error: unknown option '--safe-mode'"
+      exit 1
+    end
+    stdin = $stdin.read
+    sys = File.read(ARGV[ARGV.index("--system-prompt-file") + 1])
+    File.write(ENV["STUB_LOG"], JSON.generate(args: ARGV, stdin: stdin, system: sys, cwd: Dir.pwd))
+    if mode == "error"
+      puts JSON.generate(type: "result", is_error: true, result: "Not logged in")
+      exit 1
+    end
+    puts JSON.generate(type: "result", subtype: "success", is_error: false, result: "echo: #{stdin}",
+                       usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 2 })
+  RUBY
+
+  def setup
+    @dir = Dir.mktmpdir
+    @bin = File.join(@dir, "claude")
+    File.write(@bin, STUB)
+    File.chmod(0o755, @bin)
+    @log = File.join(@dir, "log.json")
+    ENV["STUB_LOG"] = @log
+  end
+
+  def teardown
+    ENV.delete("STUB_MODE")
+    FileUtils.rm_rf(@dir)
+  end
+
+  def call
+    client = Owlmap::ClaudeCodeClient.new(bin: @bin)
+    [client, client.complete(model: "claude-haiku-5-5", system: "SYS PROMPT", user: "hello code")]
+  end
+
+  def test_sends_prompt_on_stdin_without_tools
+    client, reply = call
+    assert_equal "echo: hello code", reply
+    log = JSON.parse(File.read(@log))
+    args = log["args"]
+    assert_equal "SYS PROMPT", log["system"]
+    assert_equal "hello code", log["stdin"]
+    assert_equal "", args[args.index("--tools") + 1]
+    assert_equal "claude-haiku-5-5", args[args.index("--model") + 1]
+    %w[-p --strict-mcp-config --no-session-persistence --safe-mode].each { |f| assert_includes args, f }
+    assert_equal "json", args[args.index("--output-format") + 1]
+    assert_includes File.basename(log["cwd"]), "owlmap-cc-", "must run in its own temp folder"
+    refute File.exist?(log["cwd"]), "temp folder must be removed after the call"
+    assert_equal 10, client.usage.input_tokens
+    assert_equal 2, client.usage.cache_read_tokens
+  end
+
+  def test_falls_back_when_safe_mode_is_unknown
+    ENV["STUB_MODE"] = "old"
+    _client, reply = call
+    assert_equal "echo: hello code", reply
+    refute_includes JSON.parse(File.read(@log))["args"], "--safe-mode"
+  end
+
+  def test_reports_errors
+    ENV["STUB_MODE"] = "error"
+    err = assert_raises(Owlmap::Error) { call }
+    assert_match(/Not logged in/, err.message)
+  end
+
+  def test_missing_binary
+    assert_raises(Owlmap::Error) { Owlmap::ClaudeCodeClient.new(bin: File.join(@dir, "nope")) }
+  end
+end

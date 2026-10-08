@@ -10,12 +10,32 @@ Pure Ruby standard library — no gems to install.
 
 - Ruby 3.2+
 - `git`
-- A Claude API key from the [Claude Console](https://platform.claude.com/), exported as `ANTHROPIC_API_KEY`
+- One way to reach Claude (see *Backends*):
+  - a Claude API key from the [Claude Console](https://platform.claude.com/), exported as `ANTHROPIC_API_KEY`, or
+  - [Claude Code](https://code.claude.com/docs/en/setup) installed and signed in on your machine
+
+## Backends
+
+| `--backend` | Uses | When |
+|---|---|---|
+| `api` | Claude API with `ANTHROPIC_API_KEY` | Always for the hosted OwlMap service, CI, or anything run for other people |
+| `claude-code` | The `claude` CLI on your machine, signed in with your own account | Your own runs while developing and tuning prompts |
+| `auto` (default) | `api` if `ANTHROPIC_API_KEY` is set, otherwise `claude-code` | |
+
+The `claude-code` backend runs `claude -p` with no tools, no MCP servers, no
+saved session, in an empty temp folder, sending only the prompt OwlMap builds.
+It defaults to 2 parallel calls to stay within subscription limits.
+
+**Do not use a Claude subscription to serve other people.** Anthropic's terms
+allow Free/Pro/Max logins for ordinary personal use; products and services must
+use API keys, and may not route their users' requests through a plan login
+([Claude Code legal and compliance](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use)).
+The web version of OwlMap will therefore always use the `api` backend.
 
 ## Usage
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
+export ANTHROPIC_API_KEY=sk-ant-...      # or skip this and use your Claude Code login
 
 # See what would be read and roughly how many tokens it costs. No API calls.
 cli/bin/owlmap https://github.com/sinatra/sinatra --dry-run
@@ -27,7 +47,7 @@ cli/bin/owlmap https://github.com/sinatra/sinatra
 cli/bin/owlmap ../my-rails-app --out docs/owlmap
 ```
 
-Options: `--out DIR`, `--dry-run`, `--max-files N` (default 500),
+Options: `--out DIR`, `--dry-run`, `--backend auto|api|claude-code`, `--max-files N` (default 500),
 `--max-input-tokens N` (default 600 000), `--concurrency N` (default 4),
 `--fast-model ID`, `--smart-model ID`. Models can also be set with
 `OWLMAP_FAST_MODEL` / `OWLMAP_SMART_MODEL`.
