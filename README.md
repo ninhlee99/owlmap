@@ -8,11 +8,39 @@
 
 ```
 owlmap/
+├── .claude-plugin/      # This repo is a Claude Code plugin marketplace
+├── plugins/owlmap/      # Claude Code plugin: the /owlmap:map skill
 ├── cli/                 # Analysis core: repo → Markdown docs via the Claude API (see cli/README.md)
 ├── landing/index.html   # Static landing page (EN/VI), deployed on Vercel
 ├── docs/PLAN.md         # Product, MVP scope, roadmap, business registration, startup program
 └── README.md
 ```
+
+## Use OwlMap inside Claude Code
+
+Install once (the repository is private, so your GitHub account needs access):
+
+```bash
+claude plugin marketplace add ninhlee99/owlmap
+claude plugin install owlmap@owlmap
+```
+
+Then, in any project:
+
+```
+/owlmap:map                                   # map the current repository
+/owlmap:map ../other-app --out docs/owlmap
+/owlmap:map https://github.com/sinatra/sinatra --lang vi
+/owlmap:map --module app/models               # refresh one module note
+```
+
+Claude Code reads the code with its own tools, delegates module summaries to
+parallel subagents on larger repos, and writes the same set of files as the CLI.
+It runs on whatever account Claude Code is signed in with. Skill source:
+[`plugins/owlmap/skills/map/SKILL.md`](plugins/owlmap/skills/map/SKILL.md).
+
+Without the marketplace: copy `plugins/owlmap/skills/map/` to
+`~/.claude/skills/owlmap/` and run it as `/owlmap`.
 
 ## Landing page
 

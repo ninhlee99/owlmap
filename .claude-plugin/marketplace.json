@@ -1,0 +1,14 @@
+{
+  "name": "owlmap",
+  "description": "OwlMap plugins for Claude Code",
+  "owner": {
+    "name": "Ninh Lee"
+  },
+  "plugins": [
+    {
+      "name": "owlmap",
+      "source": "./plugins/owlmap",
+      "description": "Generate architecture, flow, module and onboarding docs for a codebase with /owlmap:map"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "name": "owlmap",
+  "version": "0.1.0",
+  "description": "Turn an undocumented codebase into a navigable map: architecture overview, key flows with diagrams, per-module notes and an onboarding guide.",
+  "author": {
+    "name": "Ninh Lee"
+  },
+  "homepage": "https://owlmap-ninh-le-projects.vercel.app",
+  "repository": "https://github.com/ninhlee99/owlmap",
+  "keywords": ["documentation", "onboarding", "architecture", "codebase"]
+}
