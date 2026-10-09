@@ -8,11 +8,12 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 use std::thread::sleep;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
+use regex::Regex;
 use serde_json::{json, Value};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -47,6 +48,16 @@ impl Usage {
 pub trait Llm: Send + Sync {
     fn complete(&self, model: &str, system: &str, user: &str, max_tokens: u32) -> Result<String>;
     fn usage(&self) -> Usage;
+}
+
+static FATAL: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)usage limit|limit reached|hit your limit|credit balance|not logged in|/login|invalid api key|invalid x-api-key|authentication|permission denied|quota").unwrap()
+});
+
+/// Errors after which every further call would fail the same way
+/// (usage limit, not signed in, bad key). Callers stop instead of retrying.
+pub fn is_fatal(message: &str) -> bool {
+    FATAL.is_match(message)
 }
 
 // ---------------------------------------------------------------------------
@@ -171,6 +182,7 @@ fn backoff(attempt: u32) -> f64 {
 /// session, in an empty temporary folder, so Claude sees only what we send.
 pub struct ClaudeCodeClient {
     bin: String,
+    retries: u32,
     safe_mode: AtomicBool,
     usage: Mutex<Usage>,
 }
@@ -187,7 +199,13 @@ impl ClaudeCodeClient {
         if !ok.success() {
             bail!("`{bin} --version` failed.");
         }
-        Ok(Self { bin, safe_mode: AtomicBool::new(true), usage: Mutex::new(Usage::default()) })
+        Ok(Self { bin, retries: 2, safe_mode: AtomicBool::new(true), usage: Mutex::new(Usage::default()) })
+    }
+
+    /// Number of retries for transient failures (default 2).
+    pub fn with_retries(mut self, n: u32) -> Self {
+        self.retries = n;
+        self
     }
 
     fn run(&self, dir: &std::path::Path, model: &str, prompt_file: &std::path::Path, user: &str) -> Result<std::process::Output> {
@@ -219,7 +237,28 @@ impl ClaudeCodeClient {
 }
 
 impl Llm for ClaudeCodeClient {
+    /// Retries transient failures twice (5 s, then 20 s); fatal ones fail at once.
     fn complete(&self, model: &str, system: &str, user: &str, _max_tokens: u32) -> Result<String> {
+        let mut attempt = 0;
+        loop {
+            match self.complete_once(model, system, user) {
+                Ok(r) => return Ok(r),
+                Err(e) if attempt < self.retries && !is_fatal(&e.to_string()) => {
+                    sleep(Duration::from_secs(if attempt == 0 { 5 } else { 20 }));
+                    attempt += 1;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
+    fn usage(&self) -> Usage {
+        *self.usage.lock().unwrap()
+    }
+}
+
+impl ClaudeCodeClient {
+    fn complete_once(&self, model: &str, system: &str, user: &str) -> Result<String> {
         // Empty working directory: no project CLAUDE.md, settings or files to pick up.
         let dir = tempfile::Builder::new().prefix("owlmap-cc-").tempdir()?;
         let prompt_file = dir.path().join("system.txt");
@@ -248,9 +287,5 @@ impl Llm for ClaudeCodeClient {
                 bail!("Claude Code call failed: {}", detail.trim().chars().take(300).collect::<String>())
             }
         }
-    }
-
-    fn usage(&self) -> Usage {
-        *self.usage.lock().unwrap()
     }
 }

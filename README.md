@@ -31,12 +31,13 @@ Then, in any project:
 /owlmap:map                                   # map the current repository
 /owlmap:map ../other-app --out docs/owlmap
 /owlmap:map https://github.com/sinatra/sinatra --lang vi
-/owlmap:map --module app/models               # refresh one module note
+/owlmap:map ../candidate ../company ../api --lang vi   # several repos + SYSTEM.md
 ```
 
-Claude Code reads the code with its own tools, delegates module summaries to
-parallel subagents on larger repos, and writes the same set of files as the CLI.
-It runs on whatever account Claude Code is signed in with. Skill source:
+The skill drives the `owlmap` CLI (install it once, see [`cli/README.md`](cli/README.md)):
+it shows the estimate, runs the CLI in the background with your Claude Code
+account, reports progress, and resumes after usage limits. Without the CLI it
+falls back to a disk-based procedure for small repositories only. Skill source:
 [`plugins/owlmap/skills/map/SKILL.md`](plugins/owlmap/skills/map/SKILL.md).
 
 Without the marketplace: copy `plugins/owlmap/skills/map/` to

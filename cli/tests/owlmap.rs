@@ -7,14 +7,14 @@ use std::sync::Mutex;
 
 use anyhow::{bail, Result};
 use owlmap::analyzer::{parse_json_object, Analyzer};
-use owlmap::cache::Cache;
+use owlmap::cache::CacheStore;
 use owlmap::i18n::Lang;
 use owlmap::client::{ClaudeCodeClient, Llm, Usage};
 use owlmap::config::Config;
 use owlmap::grouper::{slug, Grouper};
 use owlmap::prompts;
 use owlmap::repo_source::{RepoSource, GITHUB_URL};
-use owlmap::scanner::{Scanner, SourceFile};
+use owlmap::scanner::{Detail, ReadMode, ScanOptions, Scanner, SourceFile};
 use owlmap::writer::{self, SourceInfo};
 use serde_json::json;
 
@@ -41,12 +41,24 @@ struct Call {
 struct FakeClient {
     module_reply: Option<String>,
     fail_on: Option<String>,
+    /// Every call after this many fails with a usage-limit error.
+    limit_after: Option<usize>,
     calls: Mutex<Vec<Call>>,
 }
 
 impl Llm for FakeClient {
     fn complete(&self, model: &str, system: &str, user: &str, _max: u32) -> Result<String> {
-        self.calls.lock().unwrap().push(Call { model: model.into(), system: system.into(), user: user.into() });
+        let n = {
+            let mut calls = self.calls.lock().unwrap();
+            calls.push(Call { model: model.into(), system: system.into(), user: user.into() });
+            calls.len()
+        };
+        if self.limit_after.is_some_and(|l| n > l) {
+            bail!("Claude Code call failed: Claude AI usage limit reached");
+        }
+        if system == prompts::AREA_SYSTEM.as_str() {
+            return Ok("{\"purpose\": \"An area.\", \"components\": [], \"interfaces\": [\"I\"], \"depends_on\": [], \"data\": [], \"risks\": []}".into());
+        }
         if let Some(f) = &self.fail_on {
             if user.contains(f.as_str()) {
                 bail!("boom");
@@ -69,7 +81,7 @@ impl Llm for FakeClient {
 }
 
 fn sf(path: &str, size: u64) -> SourceFile {
-    SourceFile { path: path.into(), size, language: "Ruby".into(), test: false }
+    SourceFile { path: path.into(), size, language: "Ruby".into(), ..Default::default() }
 }
 
 fn names(mods: &[owlmap::grouper::Module]) -> Vec<&str> {
@@ -135,10 +147,10 @@ fn scanner_does_not_follow_symlinks() {
 fn test_files_are_truncated_when_read() {
     let body: String = (0..100).map(|i| format!("line {i}\n")).collect();
     let root = make_repo(&[("spec/big_spec.rb", body.as_bytes())]);
-    let f = SourceFile { path: "spec/big_spec.rb".into(), size: body.len() as u64, language: "Ruby".into(), test: true };
+    let f = SourceFile { path: "spec/big_spec.rb".into(), size: body.len() as u64, language: "Ruby".into(), test: true, mode: ReadMode::Head(60) };
     let text = f.read(root.path());
     assert!(text.contains("line 59\n") && !text.contains("line 60\n"));
-    assert!(text.contains("40 more lines of tests not shown"));
+    assert!(text.contains("40 more lines not shown"));
 }
 
 // ---- grouper ---------------------------------------------------------------
@@ -182,13 +194,13 @@ fn grouper_folds_tiny_modules() {
 #[test]
 fn grouper_keeps_tests_apart() {
     let files = [
-        SourceFile { test: true, ..sf("contrib/spec/b_spec.rb", 100) },
+        SourceFile { test: true, mode: ReadMode::TestNames(12), ..sf("contrib/spec/b_spec.rb", 100) },
         sf("lib/a.rb", 5_000),
-        SourceFile { test: true, ..sf("test/a_test.rb", 90_000) },
+        SourceFile { test: true, mode: ReadMode::TestNames(12), ..sf("test/a_test.rb", 90_000) },
     ];
     let mods = Grouper::new(50_000, 3_000).group(&files);
     assert_eq!(names(&mods), ["contrib (tests)", "lib", "project (tests)"]);
-    assert_eq!(mods[2].bytes(), 3_600, "test files count at their truncated size");
+    assert_eq!(mods[2].bytes(), 480, "test files count at their truncated size");
 }
 
 #[test]
@@ -253,6 +265,7 @@ fn analyzer_end_to_end_with_fake_client() {
     assert_eq!(synth.len(), 3);
     assert!(synth.iter().all(|c| c.model == config.smart_model));
     assert!(synth[0].user.contains("=== README.md ==="), "manifests should be included");
+    assert_eq!(synth[0].user.matches("<module_summaries>").count(), 1, "the code block is tagged exactly once");
     assert!(!synth[0].user.contains("class AuthService"), "overview calls must not resend raw code");
 }
 
@@ -317,7 +330,7 @@ fn writer_writes_full_doc_set() {
 
     let mut top: Vec<_> = fs::read_dir(out.path()).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
     top.sort();
-    assert_eq!(top, [".owlmap-cache.json", "ARCHITECTURE.md", "FLOWS.md", "ONBOARDING.md", "README.md", "modules", "owlmap.json"]);
+    assert_eq!(top, ["ARCHITECTURE.md", "FLOWS.md", "ONBOARDING.md", "README.md", "modules", "owlmap.json"]);
     let mut mods: Vec<_> = fs::read_dir(out.path().join("modules")).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
     mods.sort();
     assert_eq!(mods, ["app-models.md", "lib.md"]);
@@ -444,11 +457,23 @@ fn counts(client: &FakeClient) -> (usize, usize) {
 
 /// Runs into `out`, carrying the cache between runs exactly as the CLI does.
 fn run_into(root: &Path, out: &Path, config: &Config, client: &FakeClient) -> owlmap::analyzer::RunResult {
-    let prev = Cache::load(out).entries;
-    let r = Analyzer::new(root, "shop", config).quiet().with_cache(prev).run(client).unwrap();
+    let store = CacheStore::open(out, false);
+    let r = Analyzer::new(root, "shop", config).quiet().with_store(&store).run(client).unwrap();
+    if r.stopped.is_some() {
+        store.save_progress().unwrap();
+        return r;
+    }
     let info = SourceInfo { name: "shop".into(), url: None, commit: None };
     writer::write(out, &r, &info, config, None).unwrap();
+    store.finish().unwrap();
     r
+}
+
+fn pending_of(root: &Path, out: &Path, config: &Config) -> owlmap::analyzer::Pending {
+    let store = CacheStore::open(out, false);
+    let a = Analyzer::new(root, "shop", config).with_store(&store);
+    let plan = a.plan().unwrap();
+    a.pending(&plan)
 }
 
 #[test]
@@ -467,9 +492,7 @@ fn second_run_reuses_everything_when_nothing_changed() {
     assert_eq!(counts(&second), (0, 0), "nothing changed, so nothing is sent");
     assert_eq!((r2.reused_modules, r2.reused_documents), (4, 3));
     assert_eq!(r1.documents, r2.documents);
-    let a = Analyzer::new(root.path(), "shop", &config).with_cache(Cache::load(out.path()).entries);
-    let plan = a.plan().unwrap();
-    assert_eq!(a.pending(&plan).estimated_input_tokens, 0, "an unchanged repo costs nothing");
+    assert_eq!(pending_of(root.path(), out.path(), &config).estimated_input_tokens, 0, "an unchanged repo costs nothing");
     assert_eq!(r2.summaries[0]["purpose"], "Handles things. More detail.");
 }
 
@@ -495,9 +518,7 @@ fn changing_one_file_resends_only_its_module_and_the_overviews() {
     run_into(root.path(), out.path(), &config, &client);
     assert_eq!(counts(&client), (1, 3));
 
-    let pending = Analyzer::new(root.path(), "shop", &config).with_cache(Cache::load(out.path()).entries);
-    let plan = pending.plan().unwrap();
-    assert_eq!(pending.pending(&plan).cached_modules, 4, "the cache now reflects the new content");
+    assert_eq!(pending_of(root.path(), out.path(), &config).cached_modules, 4, "the cache now reflects the new content");
 }
 
 #[test]
@@ -569,4 +590,208 @@ fn language_reaches_prompts_and_labels() {
 fn cache_keys_are_length_prefixed() {
     assert_ne!(owlmap::cache::key(&["ab", "c"]), owlmap::cache::key(&["a", "bc"]));
     assert_eq!(owlmap::cache::key(&["x"]).len(), 64);
+}
+
+// ---- large repositories ----------------------------------------------------
+
+#[test]
+fn low_signal_bulk_and_filters_are_skipped() {
+    let root = make_repo(&[
+        ("app/models/user.rb", b"class User; end\n"),
+        ("db/migrate/001_create_users.rb", b"class CreateUsers; end\n"),
+        ("config/locales/ja.yml", b"ja:\n  hello: x\n"),
+        ("config/locales/en.yml", b"en:\n  hello: x\n"),
+        ("spec/fixtures/users.yml", b"one: {}\n"),
+        ("public/index.html", b"<html></html>\n"),
+        ("plugins/chat/plugin.rb", b"module Chat; end\n"),
+        ("spec/models/user_spec.rb", b"describe User do\n  it 'works' do\n  end\nend\n"),
+    ]);
+    let scan = |o: ScanOptions| Scanner::with_options(root.path(), o).unwrap().scan();
+    let paths = |r: owlmap::scanner::ScanResult| r.files.into_iter().map(|f| f.path).collect::<Vec<_>>();
+
+    let r = scan(ScanOptions::default());
+    assert_eq!(r.skipped["low_signal"], 5);
+    assert_eq!(paths(r), ["app/models/user.rb", "plugins/chat/plugin.rb", "spec/models/user_spec.rb"]);
+
+    let r = scan(ScanOptions { all_files: true, ..Default::default() });
+    assert_eq!(r.files.len(), 8);
+
+    let r = scan(ScanOptions { exclude: vec!["plugins".into()], skip_tests: true, ..Default::default() });
+    assert_eq!(paths(r), ["app/models/user.rb"]);
+
+    let r = scan(ScanOptions { include: vec!["app/**".into(), "spec".into()], ..Default::default() });
+    assert_eq!(paths(r), ["app/models/user.rb", "spec/models/user_spec.rb"]);
+
+    assert!(Scanner::with_options(root.path(), ScanOptions { include: vec!["[".into()], ..Default::default() }).is_err());
+}
+
+#[test]
+fn long_files_are_read_as_outlines_and_tests_as_names() {
+    let mut code = String::from("# frozen_string_literal: true\nclass Billing\n");
+    for i in 0..200 {
+        code += &format!("  def charge_{i}(amount)\n    total = amount * {i}\n    tax = total * 0.1\n    fee = 30\n    log(total)\n    notify(total)\n    total + tax + fee\n  end\n\n");
+    }
+    code += "end\n";
+    let mut spec = String::from("require 'rails_helper'\nRSpec.describe Billing do\n");
+    for i in 0..30 {
+        spec += &format!("  it 'charges case {i}' do\n    expect(1).to eq(1)\n  end\n");
+    }
+    spec += "end\n";
+    let root = make_repo(&[("app/billing.rb", code.as_bytes()), ("spec/billing_spec.rb", spec.as_bytes())]);
+
+    let files = Scanner::with_options(root.path(), ScanOptions::default()).unwrap().scan().files;
+    let billing = files.iter().find(|f| f.path == "app/billing.rb").unwrap();
+    assert!(matches!(billing.mode, ReadMode::Outline { .. }));
+    let text = billing.read(root.path());
+    assert!(text.contains("declarations below with line numbers"));
+    assert!(text.contains("def charge_199(amount)"), "every declaration is listed");
+    assert!(!text.contains("amount * 199"), "bodies are not");
+    assert!(text.len() < code.len() / 3, "{} vs {}", text.len(), code.len());
+
+    let spec_file = files.iter().find(|f| f.path == "spec/billing_spec.rb").unwrap();
+    let names = spec_file.read(root.path());
+    assert!(names.starts_with("RSpec.describe Billing do"), "{names}");
+    assert!(names.contains("it 'charges case 10'") && !names.contains("expect(1)"));
+    assert!(names.lines().count() <= 13);
+
+    let deep = Scanner::with_options(root.path(), ScanOptions { detail: Detail::Deep, ..Default::default() }).unwrap().scan().files;
+    assert!(matches!(deep.iter().find(|f| f.path == "spec/billing_spec.rb").unwrap().mode, ReadMode::Head(60)));
+}
+
+fn module(name: &str) -> owlmap::grouper::Module {
+    owlmap::grouper::Module { name: name.into(), files: vec![sf(&format!("{name}/x.rb"), 10)] }
+}
+
+#[test]
+fn areas_split_big_folders_and_merge_tiny_ones() {
+    let mut mods: Vec<_> = (0..6).map(|i| module(&format!("app/models/m{i}"))).collect();
+    mods.extend((0..5).map(|i| module(&format!("app/controllers/c{i}"))));
+    mods.push(module("app/mailers"));
+    mods.push(module("app/jobs"));
+    mods.push(module("lib"));
+    mods.push(module(".github"));
+    mods.push(owlmap::grouper::Module { name: "project (tests)".into(), files: vec![] });
+    mods.push(owlmap::grouper::Module { name: "(root)".into(), files: vec![] });
+
+    let groups = owlmap::analyzer::area_groups(&mods, 6);
+    let names: Vec<&str> = groups.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(names, ["(other)", "(root)", "(tests)", "app/controllers", "app/models"]);
+    let other: Vec<&str> = groups[0].1.iter().map(|&i| mods[i].name.as_str()).collect();
+    assert_eq!(other, ["app/mailers", "app/jobs", "lib", ".github"], "tiny folders at any level are gathered");
+    let total: usize = groups.iter().map(|(_, m)| m.len()).sum();
+    assert_eq!(total, mods.len(), "every module lands in exactly one area");
+    assert!(groups.iter().all(|(_, m)| m.len() <= 6));
+}
+
+fn wide_repo() -> tempfile::TempDir {
+    let files: Vec<(String, Vec<u8>)> =
+        (0..12).map(|i| (format!("lib/part{i}/thing.rb"), format!("class Thing{i}; end\n").into_bytes())).collect();
+    let refs: Vec<(&str, &[u8])> = files.iter().map(|(p, b)| (p.as_str(), b.as_slice())).collect();
+    make_repo(&refs)
+}
+
+#[test]
+fn large_repos_roll_up_into_areas_before_the_overview() {
+    let root = wide_repo();
+    let config = Config { rollup_threshold: 5, area_max_modules: 4, ..quiet_config() };
+    let client = FakeClient::default();
+    let r = Analyzer::new(root.path(), "wide", &config).quiet().run(&client).unwrap();
+
+    assert_eq!(r.summaries.len(), 12);
+    assert_eq!(r.areas.len(), 3, "12 modules in areas of at most 4");
+    let calls = client.calls.lock().unwrap();
+    assert_eq!(calls.iter().filter(|c| c.system == *prompts::AREA_SYSTEM).count(), 3);
+    let doc = calls.iter().find(|c| c.system == *prompts::SYNTHESIS_SYSTEM).unwrap();
+    assert!(doc.user.contains("<area_summaries>") && doc.user.contains("<module_index>"));
+    assert_eq!(doc.user.matches("<area_summaries>").count(), 1);
+    assert!(!doc.user.contains("<module_summaries>"), "the overview reads areas, not every module");
+}
+
+#[test]
+fn usage_limit_stops_the_run_and_the_next_run_resumes() {
+    let root = wide_repo();
+    let out = tempfile::tempdir().unwrap();
+    let config = Config { concurrency: 1, ..quiet_config() };
+
+    let limited = FakeClient { limit_after: Some(5), ..Default::default() };
+    let r = run_into(root.path(), out.path(), &config, &limited);
+    assert!(r.stopped.as_deref().unwrap().contains("usage limit"));
+    assert!(r.documents.is_empty(), "no overview from a partial run");
+    assert_eq!(limited.calls.lock().unwrap().len(), 6, "one failed call, then nothing more is attempted");
+    assert!(!out.path().join("ARCHITECTURE.md").exists());
+
+    let client = FakeClient::default();
+    let r = run_into(root.path(), out.path(), &config, &client);
+    assert!(r.stopped.is_none());
+    assert_eq!(r.reused_modules, 5, "the five finished modules come from the saved progress");
+    assert_eq!(counts(&client), (7, 3));
+    assert!(out.path().join("ARCHITECTURE.md").exists());
+}
+
+#[test]
+fn cache_store_saves_progress_and_prunes_on_finish() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = CacheStore::open(dir.path(), false);
+    store.put("old".into(), json!(1));
+    store.finish().unwrap();
+
+    let store = CacheStore::open(dir.path(), false);
+    assert_eq!(store.len_previous(), 1);
+    store.put("new".into(), json!(2));
+    store.save_progress().unwrap();
+    assert_eq!(CacheStore::open(dir.path(), false).len_previous(), 2, "progress keeps earlier entries");
+    store.finish().unwrap();
+    assert_eq!(CacheStore::open(dir.path(), false).len_previous(), 1, "finish keeps only what was used");
+    assert_eq!(CacheStore::open(dir.path(), true).len_previous(), 0, "--fresh starts empty");
+}
+
+// ---- several repositories --------------------------------------------------
+
+#[test]
+fn integration_signals_find_env_hosts_and_repo_mentions() {
+    let root = make_repo(&[
+        ("app/clients/api_client.rb", b"BASE = ENV.fetch('COMPANY_API_URL')\nHTTP.get(\"https://api.example-corp.jp/v1/jobs\")\n"),
+        ("src/config.ts", b"export const url = process.env.COMPANY_API_URL;\nconst docs = 'https://github.com/x/y';\n"),
+        ("config/app.yml", b"redis: ${REDIS_URL:-redis://localhost:6379}\nsso: http://localhost:3001\n"),
+        ("app/models/job.rb", b"# synced from the company admin\nclass Job; end\n"),
+        ("spec/client_spec.rb", b"ENV['TEST_ONLY_VAR']\n"),
+    ]);
+    let files = Scanner::new(root.path(), 100_000).scan().files;
+    let s = owlmap::workspace::signals(root.path(), &files, &["company".into(), "api".into()]);
+    assert_eq!(s.env["COMPANY_API_URL"].len(), 2);
+    assert!(s.env.contains_key("REDIS_URL"));
+    assert!(!s.env.contains_key("TEST_ONLY_VAR"), "tests are not evidence of integrations");
+    assert!(s.hosts.contains_key("api.example-corp.jp"));
+    assert!(s.hosts.contains_key("localhost:3001"));
+    assert!(!s.hosts.contains_key("github.com"));
+    assert!(s.mentions["company"].contains("app/models/job.rb"));
+}
+
+#[test]
+fn workspace_writes_system_overview_from_every_repo() {
+    let candidate = make_repo(&[("app/clients/jobs.rb", b"URL = ENV['JOBS_API_URL'] # talks to api\n")]);
+    let api = make_repo(&[("app/controllers/jobs_controller.rb", b"class JobsController; end\n")]);
+    let out = tempfile::tempdir().unwrap();
+    let config = quiet_config();
+    let store = CacheStore::open(out.path(), false);
+    let client = FakeClient::default();
+
+    let rc = Analyzer::new(candidate.path(), "candidate", &config).quiet().with_store(&store).run(&client).unwrap();
+    let ra = Analyzer::new(api.path(), "api", &config).quiet().with_store(&store).run(&client).unwrap();
+    let repos = vec![
+        owlmap::workspace::Repo { name: "candidate".into(), root: candidate.path().into(), url: None, commit: None, result: &rc },
+        owlmap::workspace::Repo { name: "api".into(), root: api.path().into(), url: None, commit: None, result: &ra },
+    ];
+    let input = owlmap::workspace::system_input(&repos);
+    assert!(input.contains("<repository name=\"candidate\" docs=\"candidate/README.md\">"));
+    assert!(input.contains("JOBS_API_URL"));
+    assert!(input.contains("Mentions of the other repositories:\n- api"));
+
+    let (_, reused) = owlmap::workspace::system_doc(&repos, &config, &store, &client).unwrap();
+    assert!(!reused);
+    let (_, reused) = owlmap::workspace::system_doc(&repos, &config, &store, &client).unwrap();
+    assert!(reused, "unchanged inputs come from the cache");
+
+    let index = owlmap::workspace::index_markdown(&repos, &config);
+    assert!(index.contains("[System overview](SYSTEM.md)") && index.contains("| [api](api/README.md) |"));
 }

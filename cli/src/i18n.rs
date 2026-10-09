@@ -65,6 +65,12 @@ pub struct Labels {
     pub purpose: &'static str,
     pub summary_failed: &'static str,
     pub footer: &'static str,
+    pub areas: &'static str,
+    pub area: &'static str,
+    pub system: (&'static str, &'static str),
+    pub repositories: &'static str,
+    pub repository: &'static str,
+    pub workspace_title: &'static str,
 }
 
 static EN: Labels = Labels {
@@ -92,6 +98,12 @@ static EN: Labels = Labels {
     purpose: "Purpose",
     summary_failed: "_summary failed_",
     footer: "Written by OwlMap with Claude. Review before relying on it: statements marked \"Unverified:\" are inferences.",
+    areas: "Areas",
+    area: "Area",
+    system: ("System overview", "How do the repositories work together?"),
+    repositories: "Repositories",
+    repository: "Repository",
+    workspace_title: "Workspace",
 };
 
 static VI: Labels = Labels {
@@ -119,6 +131,12 @@ static VI: Labels = Labels {
     purpose: "Mục đích",
     summary_failed: "_tóm tắt thất bại_",
     footer: "Do OwlMap viết cùng Claude. Hãy kiểm tra trước khi dựa vào: các ý ghi \"Unverified:\" là suy luận.",
+    areas: "Khu vực",
+    area: "Khu vực",
+    system: ("Tổng quan hệ thống", "Các repository phối hợp với nhau thế nào?"),
+    repositories: "Repository",
+    repository: "Repository",
+    workspace_title: "Workspace",
 };
 
 static JA: Labels = Labels {
@@ -146,4 +164,10 @@ static JA: Labels = Labels {
     purpose: "役割",
     summary_failed: "_要約に失敗_",
     footer: "OwlMap と Claude が作成しました。利用前に確認してください。「Unverified:」の記述は推測です。",
+    areas: "エリア",
+    area: "エリア",
+    system: ("システム概要", "リポジトリ同士はどう連携しているか"),
+    repositories: "リポジトリ",
+    repository: "リポジトリ",
+    workspace_title: "ワークスペース",
 };

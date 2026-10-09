@@ -2,12 +2,14 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, ValueEnum};
-use owlmap::analyzer::Analyzer;
+use owlmap::analyzer::{Analyzer, Plan};
+use owlmap::cache::CacheStore;
 use owlmap::client::{ApiClient, ClaudeCodeClient, Llm};
-use owlmap::cache::Cache;
 use owlmap::config::Config;
 use owlmap::i18n::Lang;
 use owlmap::repo_source::RepoSource;
+use owlmap::scanner::{Detail, ScanOptions};
+use owlmap::workspace::{self, Repo};
 use owlmap::writer::{self, SourceInfo};
 
 #[derive(Clone, Copy, Debug, PartialEq, ValueEnum)]
@@ -20,18 +22,29 @@ enum Backend {
     ClaudeCode,
 }
 
-/// OwlMap — turn a codebase into a navigable map.
+const AFTER_HELP: &str = "\
+Examples:
+  owlmap https://github.com/sinatra/sinatra
+  owlmap ../my-rails-app --out docs/owlmap --lang vi
+  owlmap ../candidate ../company ../api --out docs/system     # several repos + SYSTEM.md
+  owlmap ../big-monorepo --exclude 'plugins/**' --skip-tests --dry-run
+
+Large repositories: migrations, translations, fixtures and generated code are
+skipped (see --all-files); long files are read as outlines; above 30 modules,
+summaries are rolled up by area first.
+
+Re-running into the same --out folder only sends what changed. Progress is
+saved as the run goes, so an interrupted run (usage limit, network) resumes
+where it stopped. Use --fresh to ignore the cache.";
+
+/// OwlMap — turn one or more codebases into a navigable map.
 #[derive(Parser, Debug)]
-#[command(
-    version,
-    after_help = "Examples:\n  owlmap https://github.com/sinatra/sinatra\n  owlmap ../my-rails-app --out docs/owlmap\n  \
-owlmap https://github.com/rack/rack --dry-run\n  owlmap ../my-app --backend claude-code\n  owlmap ../my-app --lang vi\n\n\
-Re-running into the same --out folder only sends changed modules to Claude\n(cache: <out>/.owlmap-cache.json). Use --fresh to ignore it."
-)]
+#[command(version, after_help = AFTER_HELP)]
 struct Args {
-    /// Public GitHub URL (https://github.com/owner/repo) or a local folder
-    target: String,
-    /// Where to write the docs [default: owlmap-docs/<repo>]
+    /// Public GitHub URLs (https://github.com/owner/repo) or local folders
+    #[arg(required = true, num_args = 1..)]
+    targets: Vec<String>,
+    /// Where to write the docs [default: owlmap-docs/<repo>, or owlmap-docs/workspace for several]
     #[arg(short, long)]
     out: Option<PathBuf>,
     /// Scan and estimate cost without calling Claude
@@ -43,30 +56,48 @@ struct Args {
     /// Language of the generated docs (code names are never translated)
     #[arg(long, value_enum, default_value_t = Lang::En)]
     lang: Lang,
-    /// Ignore the cache from the previous run and re-analyse every module
+    /// Ignore the cache from previous runs and re-analyse everything
     #[arg(long)]
     fresh: bool,
-    /// Refuse repos with more source files than this
-    #[arg(long, default_value_t = 500)]
+    /// Only read paths matching this glob (repeatable), e.g. 'app/**'
+    #[arg(long, value_name = "GLOB")]
+    include: Vec<String>,
+    /// Skip paths matching this glob (repeatable), e.g. 'plugins/**'
+    #[arg(long, value_name = "GLOB")]
+    exclude: Vec<String>,
+    /// How much of each file to read: quick (outlines), standard, deep (full files)
+    #[arg(long, value_enum, default_value_t = Detail::Standard)]
+    detail: Detail,
+    /// Leave test files out entirely (they are otherwise read from their first lines)
+    #[arg(long)]
+    skip_tests: bool,
+    /// Also read migrations, translations, fixtures and generated code
+    #[arg(long)]
+    all_files: bool,
+    /// Refuse a repository with more source files than this, after filtering
+    #[arg(long, default_value_t = 20_000)]
     max_files: usize,
-    /// Abort if the input estimate is higher than this
-    #[arg(long, default_value_t = 600_000)]
+    /// Stop before starting if the estimated input for the whole run is higher
+    #[arg(long, default_value_t = 20_000_000)]
     max_input_tokens: u64,
-    /// Parallel module summaries [default: 4, or 2 with claude-code]
+    /// Parallel Claude calls [default: 4, or 2 with claude-code]
     #[arg(long, value_parser = clap::value_parser!(u16).range(1..=16))]
     concurrency: Option<u16>,
-    /// Model for module summaries [default: claude-haiku-5-5, or $OWLMAP_FAST_MODEL]
+    /// Model for module and area summaries [default: claude-haiku-5-5, or $OWLMAP_FAST_MODEL]
     #[arg(long)]
     fast_model: Option<String>,
     /// Model for the overview documents [default: claude-sonnet-5-5, or $OWLMAP_SMART_MODEL]
     #[arg(long)]
     smart_model: Option<String>,
+    /// List every module in the dry run, even for several repositories
+    #[arg(short, long)]
+    verbose: bool,
 }
 
 fn main() -> ExitCode {
     let args = Args::parse();
     match run(args) {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(code) => code,
         Err(e) => {
             eprintln!("owlmap: {e:#}");
             ExitCode::FAILURE
@@ -74,88 +105,171 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(args: Args) -> anyhow::Result<()> {
-    let mut config =
-        Config { max_files: args.max_files, max_input_tokens: args.max_input_tokens, lang: args.lang, ..Config::default() };
-    if let Some(m) = args.fast_model {
-        config.fast_model = m;
+fn run(args: Args) -> anyhow::Result<ExitCode> {
+    let mut config = Config {
+        max_files: args.max_files,
+        max_input_tokens: args.max_input_tokens,
+        lang: args.lang,
+        scan: ScanOptions {
+            detail: args.detail,
+            skip_tests: args.skip_tests,
+            all_files: args.all_files,
+            include: args.include.clone(),
+            exclude: args.exclude.clone(),
+            ..ScanOptions::default()
+        },
+        ..Config::default()
+    };
+    if let Some(m) = &args.fast_model {
+        config.fast_model = m.clone();
     }
-    if let Some(m) = args.smart_model {
-        config.smart_model = m;
+    if let Some(m) = &args.smart_model {
+        config.smart_model = m.clone();
     }
 
-    let source = RepoSource::resolve(&args.target)?;
-    let shown = source.url.clone().unwrap_or_else(|| source.path.display().to_string());
-    let at = source.commit.as_deref().map(|c| format!(" @ {}", &c[..c.len().min(12)])).unwrap_or_default();
-    eprintln!("Reading {shown}{at}");
+    // Resolve every target first, so a typo fails before any work starts.
+    let mut sources: Vec<RepoSource> = Vec::new();
+    for t in &args.targets {
+        let mut s = RepoSource::resolve(t)?;
+        let base = s.name.clone();
+        let mut n = 2;
+        while sources.iter().any(|o| o.name == s.name) {
+            s.name = format!("{base}-{n}");
+            n += 1;
+        }
+        let at = s.commit.as_deref().map(|c| format!(" @ {}", &c[..c.len().min(12)])).unwrap_or_default();
+        eprintln!("Reading {} as \"{}\"{at}", s.url.clone().unwrap_or_else(|| s.path.display().to_string()), s.name);
+        sources.push(s);
+    }
+    let multi = sources.len() > 1;
+    let out = args.out.clone().unwrap_or_else(|| {
+        PathBuf::from("owlmap-docs").join(if multi { "workspace".to_string() } else { sources[0].name.clone() })
+    });
+    let repo_out = |name: &str| if multi { out.join(name) } else { out.clone() };
 
-    let client: Option<Box<dyn Llm>> = if args.dry_run {
-        None
-    } else {
-        let backend = match args.backend {
-            Backend::Auto if std::env::var("ANTHROPIC_API_KEY").map(|k| k.is_empty()).unwrap_or(true) => Backend::ClaudeCode,
-            Backend::Auto => Backend::Api,
-            b => b,
-        };
-        if backend == Backend::ClaudeCode {
-            config.concurrency = args.concurrency.map(usize::from).unwrap_or(2); // gentle on subscription limits
-            eprintln!("Using Claude Code on this machine (your own account; for personal runs only)");
-            Some(Box::new(ClaudeCodeClient::new(None)?))
+    let store = CacheStore::open(&out, args.fresh);
+    let backend = match args.backend {
+        Backend::Auto if std::env::var("ANTHROPIC_API_KEY").map(|k| k.is_empty()).unwrap_or(true) => Backend::ClaudeCode,
+        Backend::Auto => Backend::Api,
+        b => b,
+    };
+    // Gentler on subscription limits with Claude Code.
+    config.concurrency = args.concurrency.map(usize::from).unwrap_or(if backend == Backend::ClaudeCode { 2 } else { 4 });
+    let config = config;
+
+    // Plan everything and check one budget for the whole run.
+    let analyzers: Vec<Analyzer> = sources.iter().map(|s| Analyzer::new(&s.path, &s.name, &config).with_store(&store)).collect();
+    let mut plans: Vec<Plan> = Vec::new();
+    let mut total = 0;
+    let mut total_uncached = 0;
+    for (a, s) in analyzers.iter().zip(&sources) {
+        let plan = a.plan()?;
+        let pending = a.pending(&plan);
+        let skipped = if plan.skipped.is_empty() {
+            "none".to_string()
         } else {
-            config.concurrency = args.concurrency.map(usize::from).unwrap_or(4);
-            eprintln!("Using the Claude API (ANTHROPIC_API_KEY)");
-            Some(Box::new(ApiClient::from_env()?))
-        }
-    };
-
-    let out = args.out.clone().unwrap_or_else(|| PathBuf::from("owlmap-docs").join(&source.name));
-    let prev = if args.fresh { Default::default() } else { Cache::load(&out).entries };
-    let analyzer = Analyzer::new(&source.path, &source.name, &config).with_cache(prev);
-    let plan = analyzer.plan()?;
-    let skipped = if plan.skipped.is_empty() {
-        "none".to_string()
-    } else {
-        plan.skipped.iter().map(|(k, v)| format!("{v} {k}")).collect::<Vec<_>>().join(", ")
-    };
-    eprintln!("{} source files in {} modules (skipped: {skipped})", plan.files.len(), plan.modules.len());
-    let pending = analyzer.pending(&plan);
-    if pending.cached_modules > 0 {
-        eprintln!(
-            "Estimated input: ~{} tokens ({} of {} modules unchanged since the last run; ~{} without cache)",
-            pending.estimated_input_tokens,
-            pending.cached_modules,
-            plan.modules.len(),
-            plan.estimated_input_tokens
-        );
-    } else {
-        eprintln!("Estimated input: ~{} tokens", plan.estimated_input_tokens);
+            plan.skipped.iter().map(|(k, v)| format!("{v} {k}")).collect::<Vec<_>>().join(", ")
+        };
+        eprintln!("[{}] {} source files in {} modules (skipped: {skipped})", s.name, plan.files.len(), plan.modules.len());
+        let cached = if pending.cached_modules > 0 {
+            format!(" ({} of {} modules unchanged; ~{} without cache)", pending.cached_modules, plan.modules.len(), plan.estimated_input_tokens)
+        } else {
+            String::new()
+        };
+        eprintln!("[{}] Estimated input: ~{} tokens{cached}", s.name, pending.estimated_input_tokens);
+        total += pending.estimated_input_tokens;
+        total_uncached += plan.estimated_input_tokens;
+        plans.push(plan);
     }
-
-    let Some(client) = client else {
-        for m in &plan.modules {
-            eprintln!("  {:<40} {:>4} files  ~{} tokens", m.name, m.files.len(), owlmap::estimate_tokens(m.bytes()));
-        }
-        return Ok(());
-    };
-
-    let result = analyzer.run(client.as_ref())?;
-    let info = SourceInfo { name: source.name.clone(), url: source.url.clone(), commit: source.commit.clone() };
-    let usage = client.usage();
-    writer::write(&out, &result, &info, &config, Some(usage))?;
-
-    eprintln!("Done: {}", std::fs::canonicalize(&out).unwrap_or(out).display());
-    eprintln!(
-        "Usage: {} calls, {} input + {} cached + {} output tokens",
-        usage.calls, usage.input_tokens, usage.cache_read_tokens, usage.output_tokens
-    );
-    if result.reused_modules + result.reused_documents > 0 {
+    if multi {
         eprintln!(
-            "Reused from cache: {} modules, {} documents",
-            result.reused_modules, result.reused_documents
+            "Total estimated input: ~{total} tokens (~{total_uncached} without cache), plus ~{} for SYSTEM.md if anything changed",
+            workspace::system_estimate(sources.len())
         );
     }
-    if !result.failures.is_empty() {
-        eprintln!("{} module(s) failed: {}", result.failures.len(), result.failures.join(", "));
+
+    if args.dry_run {
+        if !multi || args.verbose {
+            for (plan, s) in plans.iter().zip(&sources) {
+                for m in &plan.modules {
+                    eprintln!("  [{}] {:<44} {:>5} files  ~{} tokens", s.name, m.name, m.files.len(), owlmap::estimate_tokens(m.bytes()));
+                }
+            }
+        }
+        return Ok(ExitCode::SUCCESS);
     }
-    Ok(())
+    if total > config.max_input_tokens {
+        anyhow::bail!(
+            "estimated {total} input tokens exceeds the limit of {}. Narrow it with --include/--exclude/--skip-tests, \
+             or raise --max-input-tokens.",
+            config.max_input_tokens
+        );
+    }
+
+    let client: Box<dyn Llm> = if backend == Backend::ClaudeCode {
+        eprintln!("Using Claude Code on this machine (your own account; for personal runs only)");
+        Box::new(ClaudeCodeClient::new(None)?)
+    } else {
+        eprintln!("Using the Claude API (ANTHROPIC_API_KEY)");
+        Box::new(ApiClient::from_env()?)
+    };
+
+    let mut results = Vec::new();
+    for ((a, plan), s) in analyzers.iter().zip(plans).zip(&sources) {
+        let result = a.run_checked(plan, client.as_ref());
+        if let Some(reason) = &result.stopped {
+            store.save_progress()?;
+            report_usage(client.as_ref());
+            eprintln!(
+                "\nStopped: {reason}\nEverything finished so far is saved in {}. Run the same command again later to continue \
+                 from here.",
+                out.join(owlmap::cache::FILE_NAME).display()
+            );
+            return Ok(ExitCode::from(2));
+        }
+        let dir = repo_out(&s.name);
+        let info = SourceInfo { name: s.name.clone(), url: s.url.clone(), commit: s.commit.clone() };
+        writer::write(&dir, &result, &info, &config, Some(client.usage()))?;
+        eprintln!(
+            "[{}] Done: {} (reused {} modules, {} documents from cache)",
+            s.name,
+            dir.display(),
+            result.reused_modules,
+            result.reused_documents
+        );
+        if !result.failures.is_empty() {
+            eprintln!("[{}] {} module(s) failed and will be retried next run: {}", s.name, result.failures.len(), result.failures.join(", "));
+        }
+        store.save_progress()?;
+        results.push(result);
+    }
+
+    if multi {
+        let repos: Vec<Repo> = sources
+            .iter()
+            .zip(&results)
+            .map(|(s, r)| Repo { name: s.name.clone(), root: s.path.clone(), url: s.url.clone(), commit: s.commit.clone(), result: r })
+            .collect();
+        eprintln!("Writing SYSTEM.md with {}…", config.smart_model);
+        match workspace::system_doc(&repos, &config, &store, client.as_ref()) {
+            Ok((text, reused)) => {
+                std::fs::write(out.join("SYSTEM.md"), text)?;
+                if reused {
+                    eprintln!("SYSTEM.md unchanged (from cache)");
+                }
+            }
+            Err(e) => eprintln!("Could not write SYSTEM.md: {e:#}"),
+        }
+        std::fs::write(out.join("README.md"), workspace::index_markdown(&repos, &config))?;
+    }
+
+    store.finish()?;
+    eprintln!("Done: {}", std::fs::canonicalize(&out).unwrap_or(out.clone()).display());
+    report_usage(client.as_ref());
+    Ok(ExitCode::SUCCESS)
+}
+
+fn report_usage(client: &dyn Llm) {
+    let u = client.usage();
+    eprintln!("Usage: {} calls, {} input + {} cached + {} output tokens", u.calls, u.input_tokens, u.cache_read_tokens, u.output_tokens);
 }

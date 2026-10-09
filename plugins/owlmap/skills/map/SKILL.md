@@ -1,115 +1,110 @@
 ---
 name: map
-description: Generate OwlMap documentation for a codebase — architecture overview, key flows with Mermaid diagrams, one note per module and an onboarding guide — written as Markdown files. Use when the user runs /owlmap:map or asks to map, document or onboard onto a whole repository.
-argument-hint: "[path | github-url] [--out DIR] [--lang en|vi|ja] [--module NAME]"
+description: Generate OwlMap documentation for one or more codebases — architecture overview, key flows with Mermaid diagrams, one note per module, an onboarding guide, and for several repositories a SYSTEM.md showing how they connect — written as Markdown files. Use when the user runs /owlmap:map or asks to map, document or onboard onto whole repositories, including large ones.
+argument-hint: "<path|github-url>... [--out DIR] [--lang en|vi|ja] [--include GLOB] [--exclude GLOB] [--skip-tests] [--detail quick|standard|deep]"
 disable-model-invocation: true
-allowed-tools: Read Glob Grep Bash(git ls-files *) Bash(git -C * ls-files *) Bash(git rev-parse *) Bash(git -C * rev-parse *) Bash(git clone --depth 1 *)
+allowed-tools: Read Glob Grep Bash(owlmap *) Bash(git ls-files *) Bash(git -C * ls-files *) Bash(git -C * rev-parse *) Bash(tail *)
 ---
 
-# OwlMap: map a codebase
+# OwlMap: map one or more codebases
 
 Arguments: `$ARGUMENTS`
 
-Produce documentation a developer new to this codebase can trust. Every
-statement must be grounded in code you actually read; anything inferred is
-marked `Unverified:`. Wrong documentation is worse than none.
+Targets are local folders or public `https://github.com/owner/repo` URLs.
+No target means the current working directory. Several targets (for example
+`../candidate ../company ../api`) produce one folder of docs per repository plus
+a `SYSTEM.md` describing how they connect.
 
-## 1. Resolve the target and options
+**Never read whole repositories into this conversation.** Large codebases do
+not fit, and a conversation cannot resume after a limit. The work belongs in
+the `owlmap` command, which gives every module its own fresh Claude call, saves
+progress as it goes, and resumes after an interruption.
 
-Parse the arguments:
+## 1. Use the `owlmap` command (preferred)
 
-- **Target** (optional): a local folder, or a public `https://github.com/owner/repo` URL.
-  Default: the current working directory.
-  For a GitHub URL, shallow-clone it into a new temporary folder with
-  `git clone --depth 1 -- <url> <tmp>/repo` and work there. Never ask for credentials.
-- `--out DIR`: where to write. Default `owlmap-docs/` at the root of the current
-  working directory (for a cloned URL: `owlmap-docs/<owner>-<repo>/`).
-- `--lang CODE`: language of the prose (`en` default, `vi` Vietnamese, `ja` Japanese).
-  File, class, function and route names always stay exactly as in the code.
-- `--module NAME`: only (re)write `modules/<slug>.md` for that module and leave
-  every other file untouched.
+Run `owlmap --version`.
 
-If `--out` already contains an `owlmap.json`, read it first: tell the user which
-commit it was generated from and that you will overwrite it.
+**If it is installed**, follow these steps:
 
-## 2. List the files worth reading
+1. **Estimate first.** Run the dry run with the user's targets and options:
+   `owlmap <targets…> --dry-run [--out DIR] [--lang …] [--include …] [--exclude …] [--skip-tests] [--detail …]`
+   Show the user, in a short table, each repository's files, modules and
+   estimated input tokens, plus the total.
+2. **Confirm when it is big.** If the total is over 1,000,000 tokens, say that
+   the run uses their own Claude account's usage and can take a long time, and
+   offer ways to make it smaller before starting:
+   - `--exclude 'dir/**'` for folders that don't matter (vendored plugins, generated clients)
+   - `--skip-tests`
+   - `--detail quick`
+   - `--include 'app/**'` to focus on one part
 
-Prefer `git ls-files` inside the target (it respects .gitignore); fall back to Glob.
-Then drop:
+   Wait for their answer. Under 1,000,000 tokens, go straight on.
+3. **Run it in the background** (a long run outlasts a single command's
+   timeout), writing a log:
+   `owlmap <targets…> --backend claude-code [same options] > owlmap.log 2>&1`
+   Start it as a background command, then check `tail -n 20 owlmap.log` from
+   time to time and tell the user how far it has got (modules done out of the
+   total, per repository). Don't flood the conversation with every log line.
+4. **When it ends**, read the exit status and the end of the log:
+   - **0, finished:** tell the user where the docs are (`README.md` in `--out`;
+     for several repositories also `SYSTEM.md`), how many calls were reused from
+     the cache, and suggest what to read first. Open `README.md` (and
+     `SYSTEM.md`) and spot-check five file or class names against the code
+     with Grep. Report any that don't exist.
+   - **2, stopped:** usually the account's usage limit. Everything finished so
+     far is saved. Tell the user to run the same command again later, and that
+     it will continue where it stopped.
+   - **anything else:** show the error line and suggest the fix the message
+     gives (for example `--max-input-tokens`, or a narrower `--include`).
 
-- dependencies and build output: `node_modules/ vendor/ dist/ build/ out/ target/ .next/ coverage/ tmp/ log/ public/assets/ __pycache__/ .venv/`
-- lockfiles (`*.lock`, `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `go.sum`…), minified files (`*.min.js`, `*.min.css`), images, fonts, archives and other binaries
-- boilerplate: `CHANGELOG*`, `HISTORY*`, `LICENSE*`, `CODE_OF_CONDUCT*`, `CONTRIBUTING*`, `SECURITY*`
-- **anything that may hold secrets**: `.env*`, `*.pem`, `*.key`, `id_rsa*`, `*credentials*`, `*.p12`. Never open these, and never copy a secret value into the docs even if you see one elsewhere — write "a secret is configured in <file>" instead.
-- files over ~100 KB (note them as skipped)
+Running again later into the same `--out` only sends what changed.
 
-If more than 1,500 files remain, stop and ask the user to point at a subfolder.
+**If it is not installed**, tell the user it is a one-time install:
+- From the source repository (needs Rust and access to the private repo):
+  `cargo install --git https://github.com/ninhlee99/owlmap owlmap`
+- or download a prebuilt binary from the repository's Releases page.
 
-## 3. Group files into modules
+Then continue with step 1 once it is installed. If they don't want to install
+it, use the fallback below, but only for small targets.
 
-A module is normally a folder. Rules (same as the OwlMap CLI):
+## 2. Fallback without the command (small repositories only)
 
-- Conventional containers are split one level deeper: `app/ src/ lib/ packages/ apps/ internal/ pkg/ cmd/ services/ modules/ components/ features/` → `app/models`, `app/controllers`, `src/api`…
-- A module larger than ~120 KB of text is split by the next folder level, or into `(part N)` chunks.
-- Tiny modules (under ~3 KB) are folded into their parent folder; tiny top-level folders are batched as `(small folders)`.
-- Tests (`test/ spec/ __tests__/ e2e/`, `*_test.*`, `*_spec.*`, `*.test.*`, `*.spec.*`) form separate `<area> (tests)` modules. Read only their first ~60 lines.
-- Root-level files form `(root)`.
+Use this only when the targets together have **at most 300 source files**
+(count with `git ls-files`, excluding dependencies, tests, migrations and
+translations). For anything larger, explain why the command is needed and stop.
 
-Each module's slug is its name lower-cased with runs of non-alphanumerics turned into `-` (`app/models` → `app-models`, `(root)` → `root`).
+Work entirely on disk so the conversation never holds all the summaries:
 
-Show the user the module list (name, file count) in one short table before continuing.
+1. For each target, list the files worth reading (as `owlmap` would): skip
+   `node_modules/ vendor/ dist/ build/ tmp/ log/ coverage/`, lockfiles, minified
+   files, binaries, `db/migrate/`, locale files, fixtures and generated code.
+   **Never open `.env*`, `*.pem`, `*.key`, `*credentials*`**, and never copy a
+   secret value into the docs.
+2. Group the files into modules by folder (`app/models`, `app/controllers`,
+   `lib/foo`, `(root)`; tests separately). Write the plan to
+   `<out>/.owlmap/plan.json`.
+3. Launch read-only subagents (Explore type), a few modules each. Give each one
+   its modules' exact file lists, the JSON shape below, and these rules: ground
+   every claim in the code and prefix guesses with "Unverified:". Each subagent
+   writes one file per module to `<out>/.owlmap/summaries/<repo>/<slug>.json`
+   and returns only "done".
 
-## 4. Summarise each module
+   ```json
+   {"module": "app/models", "slug": "app-models", "purpose": "1-2 sentences",
+    "key_files": [{"path": "…", "role": "…"}], "public_interface": [], "depends_on": [],
+    "used_by": [], "data": [], "risks": [], "notes": ""}
+   ```
 
-For every module, read its files and build this summary (keep it in your
-working notes; do not write it to disk yet):
+   Skip any module whose summary file already exists. That makes this resumable.
+4. Write the documents from the summary files using
+   [templates.md](templates.md): per repository `README.md`, `ARCHITECTURE.md`,
+   `FLOWS.md`, `ONBOARDING.md` and `modules/<slug>.md`. For several
+   repositories, also write `SYSTEM.md`: repositories table, how they connect
+   (with evidence such as environment variables like `*_API_URL`, URLs and
+   client classes, found with Grep), a Mermaid diagram, and cross-repository
+   flows.
+5. Spot-check ten names with Grep and fix any that don't exist. Check that every
+   Mermaid block parses.
 
-```json
-{
-  "module": "app/models",
-  "slug": "app-models",
-  "purpose": "1-2 sentences",
-  "key_files": [{"path": "app/models/user.rb", "role": "one line"}],
-  "public_interface": ["entry points other code calls"],
-  "depends_on": ["modules, packages, external services"],
-  "used_by": ["callers you saw"],
-  "data": ["tables, models, queues, caches, files read or written"],
-  "risks": ["what is easy to break when changing this, and why"],
-  "notes": ""
-}
-```
-
-At most 12 `key_files`. Use empty arrays rather than guessing.
-
-**With more than 6 modules, delegate.** Launch read-only subagents (Explore
-type) in parallel, a few modules each, and give every subagent: the module
-names with their exact file lists, the JSON shape above, the grounding rule,
-the secrets rule, and "return only the JSON array". Do the synthesis (step 5)
-yourself from what they return.
-
-## 5. Write the documents
-
-Use the templates in [templates.md](templates.md). Write, in `--out`:
-
-| File | Contents |
-|---|---|
-| `README.md` | Index: what was mapped (path or URL, commit from `git rev-parse HEAD`), links to the three documents, and a table of modules with file count and first sentence of purpose |
-| `ARCHITECTURE.md` | Summary, tech stack, components, how data moves, external services, one Mermaid `flowchart LR` (≤15 nodes) |
-| `FLOWS.md` | 2–4 key flows: numbered steps naming real files/classes, a Mermaid `sequenceDiagram` (≤8 participants), "Watch out" pitfalls |
-| `ONBOARDING.md` | Read-these-first list, run-it-locally commands taken only from files you saw, where-things-live table, newcomer Q&A, handle-with-care |
-| `modules/<slug>.md` | One per module, from its summary |
-| `owlmap.json` | `{"generator": "owlmap-skill", "version": "0.1.0", "generated_at", "source": {"path" or "url", "commit"}, "lang", "files", "modules": [names], "skipped": {reason: count}}` |
-
-Link module names as `[name](modules/<slug>.md)`.
-
-## 6. Check before you finish
-
-- Every file, class, function and route named in the docs exists — spot-check
-  at least 10 names with Grep and fix any that don't.
-- Every Mermaid block is valid: `flowchart LR` / `sequenceDiagram` first line,
-  node ids without spaces, labels with special characters wrapped in quotes.
-- No secret values anywhere in the output.
-- If you cloned a URL, delete the temporary folder.
-
-Finish with: where the docs were written, the module count, anything skipped
-or marked `Unverified:`, and one suggestion for what to read first.
+Write prose in the requested `--lang` (`en` default, `vi`, `ja`). File, class,
+function and route names always stay exactly as in the code.

@@ -1,11 +1,16 @@
 {
   "name": "owlmap",
-  "version": "0.1.0",
-  "description": "Turn an undocumented codebase into a navigable map: architecture overview, key flows with diagrams, per-module notes and an onboarding guide.",
+  "version": "0.2.0",
+  "description": "Turn one or more codebases into a navigable map: architecture overview, key flows with diagrams, per-module notes, an onboarding guide, and a system overview across repositories.",
   "author": {
     "name": "Ninh Lee"
   },
   "homepage": "https://owlmap.zan.io.vn",
   "repository": "https://github.com/ninhlee99/owlmap",
-  "keywords": ["documentation", "onboarding", "architecture", "codebase"]
+  "keywords": [
+    "documentation",
+    "onboarding",
+    "architecture",
+    "codebase"
+  ]
 }

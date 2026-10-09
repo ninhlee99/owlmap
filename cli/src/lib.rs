@@ -14,6 +14,7 @@ pub mod i18n;
 pub mod prompts;
 pub mod repo_source;
 pub mod scanner;
+pub mod workspace;
 pub mod writer;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

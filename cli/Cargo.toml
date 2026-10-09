@@ -1,6 +1,6 @@
 [package]
 name = "owlmap"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 description = "Turn an undocumented codebase into a navigable map with Claude"
 license = "UNLICENSED"
@@ -17,6 +17,7 @@ regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+globset = "0.4"
 tempfile = "3"
 ureq = { version = "2", features = ["json"] }
 

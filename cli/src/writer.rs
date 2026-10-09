@@ -8,7 +8,6 @@ use anyhow::Result;
 use serde_json::{json, Map, Value};
 
 use crate::analyzer::RunResult;
-use crate::cache::Cache;
 use crate::i18n::Labels;
 use crate::client::Usage;
 use crate::config::Config;
@@ -39,7 +38,6 @@ pub fn write(out: &Path, result: &RunResult, source: &SourceInfo, config: &Confi
     }
     fs::write(out.join("README.md"), index_markdown(result, source, labels))?;
     fs::write(out.join("owlmap.json"), serde_json::to_string_pretty(&metadata(result, source, config, usage))?)?;
-    Cache::save(out, &result.cache_entries)?;
     Ok(out.to_path_buf())
 }
 
@@ -108,6 +106,20 @@ fn index_markdown(result: &RunResult, source: &SourceInfo, l: &Labels) -> String
         })
         .collect::<Vec<_>>()
         .join("\n");
+    let areas = if result.areas.is_empty() {
+        String::new()
+    } else {
+        let rows = result
+            .areas
+            .iter()
+            .map(|a| {
+                let n = a.get("modules").and_then(Value::as_array).map_or(0, Vec::len);
+                format!("| {} | {} | {} |", str_of(a, "area"), n, first_sentence(&str_of(a, "purpose")))
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!("## {}\n\n| {} | {} | {} |\n|---|---|---|\n{rows}\n\n", l.areas, l.area, l.modules, l.purpose)
+    };
     let what = match &source.url {
         Some(u) => format!("[{u}]({u})"),
         None => format!("`{}`", source.name),
@@ -120,7 +132,7 @@ fn index_markdown(result: &RunResult, source: &SourceInfo, l: &Labels) -> String
 | [{a0}](ARCHITECTURE.md) | {a1} |\n\
 | [{f0}](FLOWS.md) | {f1} |\n\
 | [{o0}](ONBOARDING.md) | {o1} |\n\n\
-**{nf} {files_in} {nm} {mods_lc}** · {langs}\n\n## {mods}\n\n| {module} | {files} | {purpose} |\n|---|---|---|\n{rows}\n\n\
+**{nf} {files_in} {nm} {mods_lc}** · {langs}\n\n{areas}## {mods}\n\n| {module} | {files} | {purpose} |\n|---|---|---|\n{rows}\n\n\
 ---\n{footer}\n",
         name = source.name,
         gen = l.generated_for,
@@ -152,6 +164,7 @@ fn metadata(result: &RunResult, source: &SourceInfo, config: &Config, usage: Opt
         "models": { "fast": config.fast_model, "smart": config.smart_model },
         "lang": config.lang.code(),
         "reused": { "modules": result.reused_modules, "documents": result.reused_documents },
+        "areas": result.areas.iter().map(|a| json!({ "area": a.get("area"), "modules": a.get("modules") })).collect::<Vec<_>>(),
         "files": result.plan.files.len(),
         "modules": result.plan.modules.len(),
         "skipped": result.plan.skipped,

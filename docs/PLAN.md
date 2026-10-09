@@ -10,6 +10,8 @@
 - [x] Plugin Claude Code: lệnh `/owlmap:map`
 - [x] Chuyển CLI từ Ruby sang Rust: một file chạy ~4 MB, kết quả chia module giống hệt bản Ruby, phần xử lý cục bộ nhanh hơn 7–18 lần; 23 test offline; workflow build bản Linux/macOS/Windows khi tạo tag `v*`
 - [x] CLI v0.3: chạy tăng dần (chỉ gửi lại module có thay đổi, repo không đổi thì không tốn token); `--lang en|vi|ja`; 30 test offline
+- [x] CLI v0.4 — repo lớn và nhiều repo: `owlmap a b c` → tài liệu từng repo + `SYSTEM.md` (cách các repo kết nối, có bằng chứng env/URL); đọc chọn lọc (`--detail`, bỏ migration/locale/fixture, outline file dài, test chỉ lấy tên); tóm tắt theo khu vực; lưu tiến độ liên tục, dừng ngay khi hết hạn mức và chạy tiếp được; 38 test. Đo trên rails / mastodon / discourse: từ 27,4M token (bị từ chối) xuống 9,2M (`standard`) hoặc 5,6M (`quick`)
+- [x] Plugin `/owlmap:map` v0.2: điều khiển CLI (ước tính → xác nhận → chạy nền → theo dõi → chạy tiếp), không còn tràn ngữ cảnh
 - [ ] Chạy thật lần đầu (API key hoặc Claude Code), chấm chất lượng trên 3–5 repo, tinh chỉnh prompt
 - [ ] Kết nối form đăng ký chờ trên landing (Formspree hoặc tương tự)
 - [ ] Web MVP (tuần 4)
