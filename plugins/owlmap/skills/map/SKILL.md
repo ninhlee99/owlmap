@@ -1,7 +1,7 @@
 ---
 name: map
 description: Generate OwlMap documentation for one or more codebases — architecture overview, key flows with Mermaid diagrams, one note per module, an onboarding guide, and for several repositories a SYSTEM.md showing how they connect — written as Markdown files. Use when the user runs /owlmap:map or asks to map, document or onboard onto whole repositories, including large ones.
-argument-hint: "<path|github-url>... [--out DIR] [--lang en|vi|ja] [--include GLOB] [--exclude GLOB] [--skip-tests] [--detail quick|standard|deep]"
+argument-hint: "[path|github-url]... [--out DIR] [--lang en|vi|ja] [--include GLOB] [--exclude GLOB] [--skip-tests] [--detail quick|standard|deep]"
 disable-model-invocation: true
 allowed-tools: Read Glob Grep Bash(owlmap *) Bash(git ls-files *) Bash(git -C * ls-files *) Bash(git -C * rev-parse *) Bash(tail *)
 ---
@@ -11,9 +11,18 @@ allowed-tools: Read Glob Grep Bash(owlmap *) Bash(git ls-files *) Bash(git -C * 
 Arguments: `$ARGUMENTS`
 
 Targets are local folders or public `https://github.com/owner/repo` URLs.
-No target means the current working directory. Several targets (for example
-`../candidate ../company ../api`) produce one folder of docs per repository plus
-a `SYSTEM.md` describing how they connect.
+No target means the current working directory.
+
+- **Current folder is a project holding several repositories** (for example
+  `candidate/ company/ api/` side by side, the folder itself not a git repo):
+  `owlmap` finds them all by itself and writes everything to **`./owlmap/`**:
+  `owlmap/README.md`, `owlmap/SYSTEM.md`, and `owlmap/<repo>/` for each
+  repository. A shared `docker-compose.yml`, `Makefile` or `README.md` in the
+  project folder is used as evidence for how they connect. Run `owlmap` with no
+  target and no `--out`, unless the user asks otherwise.
+- **Current folder is one repository:** docs go to `owlmap-docs/<repo>/`.
+- **Several targets given** (for example `../candidate ../company ../api`): one
+  folder of docs per repository plus a `SYSTEM.md`.
 
 **Never read whole repositories into this conversation.** Large codebases do
 not fit, and a conversation cannot resume after a limit. The work belongs in
@@ -26,10 +35,12 @@ Run `owlmap --version`.
 
 **If it is installed**, follow these steps:
 
-1. **Estimate first.** Run the dry run with the user's targets and options:
-   `owlmap <targets…> --dry-run [--out DIR] [--lang …] [--include …] [--exclude …] [--skip-tests] [--detail …]`
-   Show the user, in a short table, each repository's files, modules and
-   estimated input tokens, plus the total.
+1. **Estimate first.** Run the dry run with the user's targets (none for the
+   current folder) and options:
+   `owlmap [targets…] --dry-run [--out DIR] [--lang …] [--include …] [--exclude …] [--skip-tests] [--detail …]`
+   If it prints "Found N repositories in .", say which ones it found and where
+   the docs will go (`./owlmap/`). Show the user, in a short table, each
+   repository's files, modules and estimated input tokens, plus the total.
 2. **Confirm when it is big.** If the total is over 1,000,000 tokens, say that
    the run uses their own Claude account's usage and can take a long time, and
    offer ways to make it smaller before starting:
@@ -41,13 +52,14 @@ Run `owlmap --version`.
    Wait for their answer. Under 1,000,000 tokens, go straight on.
 3. **Run it in the background** (a long run outlasts a single command's
    timeout), writing a log:
-   `owlmap <targets…> --backend claude-code [same options] > owlmap.log 2>&1`
+   `owlmap [targets…] --backend claude-code [same options] > owlmap.log 2>&1`
    Start it as a background command, then check `tail -n 20 owlmap.log` from
    time to time and tell the user how far it has got (modules done out of the
    total, per repository). Don't flood the conversation with every log line.
 4. **When it ends**, read the exit status and the end of the log:
-   - **0, finished:** tell the user where the docs are (`README.md` in `--out`;
-     for several repositories also `SYSTEM.md`), how many calls were reused from
+   - **0, finished:** tell the user where the docs are (`./owlmap/README.md`
+     and `./owlmap/SYSTEM.md` for a project folder; otherwise `README.md` in the
+     output folder), how many calls were reused from
      the cache, and suggest what to read first. Open `README.md` (and
      `SYSTEM.md`) and spot-check five file or class names against the code
      with Grep. Report any that don't exist.

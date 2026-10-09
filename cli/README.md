@@ -38,6 +38,10 @@ owlmap ../my-rails-app --out docs/owlmap
 # Several repositories that form one system → one folder each + SYSTEM.md
 owlmap ../candidate ../company ../api --out docs/system --lang vi
 
+# From a project folder that holds them (candidate/ company/ api/ side by side):
+# finds every repository and writes ./owlmap/
+cd ~/work/project && owlmap --lang vi
+
 # A very large monorepo, narrowed
 owlmap ../big-app --exclude 'plugins/**' --skip-tests --detail quick --dry-run
 ```
@@ -67,10 +71,21 @@ docs/system/
 └── api/
 ```
 
+Run `owlmap` with no target inside a **project folder** (not itself a git
+repository) and it expands into every git repository one level down, skipping
+hidden folders and its own `owlmap/` output, and writes to `./owlmap/`.
+
 The connections are grounded in evidence OwlMap extracts from the code without
-Claude: the environment variables each repository reads (`ENV['COMPANY_API_URL']`,
-`process.env.…`, `${…}` in config), the hosts it calls, and the files that
-mention the other repositories by name.
+Claude:
+- the environment variables each repository reads (`ENV['API_BASE_URL']`,
+  `process.env.…`, `${…}` in config);
+- the hosts it calls;
+- references to the other repositories **as services**: `company_api`,
+  `CANDIDATE_URL`, `http://api:3000`, `../company`. A bare word such as a
+  `Company` model is not counted, since repository names are often domain nouns;
+- shared `docker-compose.yml`, `Makefile` and `README.md` in the project folder.
+
+Secret values seen in that evidence are never reproduced in the docs.
 
 ## Large repositories
 

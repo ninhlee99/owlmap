@@ -7,7 +7,7 @@ use owlmap::cache::CacheStore;
 use owlmap::client::{ApiClient, ClaudeCodeClient, Llm};
 use owlmap::config::Config;
 use owlmap::i18n::Lang;
-use owlmap::repo_source::RepoSource;
+use owlmap::repo_source::{self, RepoSource};
 use owlmap::scanner::{Detail, ScanOptions};
 use owlmap::workspace::{self, Repo};
 use owlmap::writer::{self, SourceInfo};
@@ -27,6 +27,7 @@ Examples:
   owlmap https://github.com/sinatra/sinatra
   owlmap ../my-rails-app --out docs/owlmap --lang vi
   owlmap ../candidate ../company ../api --out docs/system     # several repos + SYSTEM.md
+  owlmap .                      # in a project folder holding several repos: maps them all into ./owlmap
   owlmap ../big-monorepo --exclude 'plugins/**' --skip-tests --dry-run
 
 Large repositories: migrations, translations, fixtures and generated code are
@@ -41,10 +42,12 @@ where it stopped. Use --fresh to ignore the cache.";
 #[derive(Parser, Debug)]
 #[command(version, after_help = AFTER_HELP)]
 struct Args {
-    /// Public GitHub URLs (https://github.com/owner/repo) or local folders
-    #[arg(required = true, num_args = 1..)]
+    /// Public GitHub URLs or local folders [default: .]. A folder that is not a
+    /// repository but holds several is expanded into them.
+    #[arg(num_args = 0.., default_value = ".")]
     targets: Vec<String>,
-    /// Where to write the docs [default: owlmap-docs/<repo>, or owlmap-docs/workspace for several]
+    /// Where to write the docs [default: <project>/owlmap for a project folder,
+    /// owlmap-docs/<repo> for one repository, owlmap-docs/workspace for several]
     #[arg(short, long)]
     out: Option<PathBuf>,
     /// Scan and estimate cost without calling Claude
@@ -127,9 +130,26 @@ fn run(args: Args) -> anyhow::Result<ExitCode> {
         config.smart_model = m.clone();
     }
 
+    // A project folder holding several repositories expands into them.
+    let mut targets: Vec<String> = Vec::new();
+    let mut parent: Option<PathBuf> = None;
+    for t in &args.targets {
+        match repo_source::discover(std::path::Path::new(t)) {
+            Some(found) => {
+                let names: Vec<String> = found.iter().filter_map(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).collect();
+                eprintln!("Found {} repositories in {t}: {}", found.len(), names.join(", "));
+                if args.targets.len() == 1 {
+                    parent = Some(std::path::Path::new(t).canonicalize()?);
+                }
+                targets.extend(found.iter().map(|p| p.display().to_string()));
+            }
+            None => targets.push(t.clone()),
+        }
+    }
+
     // Resolve every target first, so a typo fails before any work starts.
     let mut sources: Vec<RepoSource> = Vec::new();
-    for t in &args.targets {
+    for t in &targets {
         let mut s = RepoSource::resolve(t)?;
         let base = s.name.clone();
         let mut n = 2;
@@ -142,8 +162,10 @@ fn run(args: Args) -> anyhow::Result<ExitCode> {
         sources.push(s);
     }
     let multi = sources.len() > 1;
-    let out = args.out.clone().unwrap_or_else(|| {
-        PathBuf::from("owlmap-docs").join(if multi { "workspace".to_string() } else { sources[0].name.clone() })
+    // Default output: <project>/owlmap for a project folder, otherwise owlmap-docs/…
+    let out = args.out.clone().unwrap_or_else(|| match &parent {
+        Some(p) => p.join("owlmap"),
+        None => PathBuf::from("owlmap-docs").join(if multi { "workspace".to_string() } else { sources[0].name.clone() }),
     });
     let repo_out = |name: &str| if multi { out.join(name) } else { out.clone() };
 
@@ -251,7 +273,7 @@ fn run(args: Args) -> anyhow::Result<ExitCode> {
             .map(|(s, r)| Repo { name: s.name.clone(), root: s.path.clone(), url: s.url.clone(), commit: s.commit.clone(), result: r })
             .collect();
         eprintln!("Writing SYSTEM.md with {}…", config.smart_model);
-        match workspace::system_doc(&repos, &config, &store, client.as_ref()) {
+        match workspace::system_doc_with(&repos, parent.as_deref(), &config, &store, client.as_ref()) {
             Ok((text, reused)) => {
                 std::fs::write(out.join("SYSTEM.md"), text)?;
                 if reused {

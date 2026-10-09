@@ -12,6 +12,7 @@
 - [x] CLI v0.3: chạy tăng dần (chỉ gửi lại module có thay đổi, repo không đổi thì không tốn token); `--lang en|vi|ja`; 30 test offline
 - [x] CLI v0.4 — repo lớn và nhiều repo: `owlmap a b c` → tài liệu từng repo + `SYSTEM.md` (cách các repo kết nối, có bằng chứng env/URL); đọc chọn lọc (`--detail`, bỏ migration/locale/fixture, outline file dài, test chỉ lấy tên); tóm tắt theo khu vực; lưu tiến độ liên tục, dừng ngay khi hết hạn mức và chạy tiếp được; 38 test. Đo trên rails / mastodon / discourse: từ 27,4M token (bị từ chối) xuống 9,2M (`standard`) hoặc 5,6M (`quick`)
 - [x] Plugin `/owlmap:map` v0.2: điều khiển CLI (ước tính → xác nhận → chạy nền → theo dõi → chạy tiếp), không còn tràn ngữ cảnh
+- [x] v0.4.1: gõ `/owlmap:map` (hoặc `owlmap`) ở thư mục project chứa nhiều repo → tự tìm tất cả repo, ghi vào `./owlmap/`; bằng chứng kết nối chặt hơn (không nhầm tên model với tên repo), dùng cả docker-compose ở thư mục cha
 - [ ] Chạy thật lần đầu (API key hoặc Claude Code), chấm chất lượng trên 3–5 repo, tinh chỉnh prompt
 - [ ] Kết nối form đăng ký chờ trên landing (Formspree hoặc tương tự)
 - [ ] Web MVP (tuần 4)

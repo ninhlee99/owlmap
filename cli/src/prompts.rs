@@ -10,8 +10,10 @@ const GROUNDING: &str = "\
 Ground every statement in the code you were given. Name real files, classes,
 functions and routes exactly as they appear. Never invent components,
 services, behaviour or configuration. When something is likely but not
-visible in the code, prefix it with \"Unverified:\". Prefer short, plain
-sentences a developer new to the project can follow.
+visible in the code, prefix it with \"Unverified:\". Never reproduce
+passwords, tokens, API keys or other secret values, even if they appear in
+the input; name the variable or file that holds them instead. Prefer short,
+plain sentences a developer new to the project can follow.
 ";
 
 pub static MODULE_SYSTEM: LazyLock<String> = LazyLock::new(|| {

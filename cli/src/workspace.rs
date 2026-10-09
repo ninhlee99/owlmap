@@ -72,13 +72,29 @@ fn is_noise(host: &str) -> bool {
     NOISE_HOSTS.iter().any(|n| host == *n || host.ends_with(&format!(".{n}")))
 }
 
+/// A reference to another repository *as a service*, not just the word.
+/// Repository names are often domain nouns (`company`, `candidate`, `api`)
+/// that appear everywhere as model names, so a bare match proves nothing.
+/// Counted: `company_api`, `COMPANY_URL`, `company-host`, `//company:3000`
+/// (a compose service name) and `../company` or `company/app/` paths.
+/// Hostnames such as `api.example.jp` are ambiguous and are reported under
+/// "Hosts referenced" instead.
+fn mention_regex(name: &str) -> Option<Regex> {
+    let n = regex::escape(name);
+    let pattern = [
+        format!(r"(?i)\b{n}[_-](?:api|url|uri|host|endpoint|base[_-]?url|server|service|domain|origin|app|web|admin|client)\b"),
+        format!(r"//{n}[:/]"),
+        format!(r"\.\./{n}\b"),
+        format!(r"\b{n}/(?:app|lib|src|config)/"),
+    ]
+    .join("|");
+    let pattern = format!("(?i){}", pattern.replace("(?i)", ""));
+    Regex::new(&pattern).ok()
+}
+
 /// Scans a repository's kept files for integration evidence.
 pub fn signals(root: &Path, files: &[SourceFile], other_repos: &[String]) -> Signals {
-    let mentions: Vec<(String, Regex)> = other_repos
-        .iter()
-        .filter(|n| n.len() >= 3)
-        .filter_map(|n| Regex::new(&format!(r"(?i)\b{}\b", regex::escape(n))).ok().map(|re| (n.clone(), re)))
-        .collect();
+    let mentions: Vec<(String, Regex)> = other_repos.iter().filter_map(|n| mention_regex(n).map(|re| (n.clone(), re))).collect();
     let mut out = Signals::default();
     for f in files.iter().filter(|f| !f.test) {
         let Ok(bytes) = fs::read(root.join(&f.path)) else { continue };
@@ -160,8 +176,36 @@ fn interfaces(result: &RunResult) -> Vec<String> {
     rows.into_iter().take(INTERFACE_MAX_LINES).collect()
 }
 
+/// Files next to the repositories that often describe how they run together
+/// (a shared docker-compose, Makefile or README in the project folder).
+pub fn workspace_files(parent: &Path) -> String {
+    const NAMES: &[&str] = &["docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml", "Makefile", "Procfile", "README.md"];
+    let mut parts = Vec::new();
+    let Ok(entries) = fs::read_dir(parent) else { return String::new() };
+    let mut names: Vec<String> = entries
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| NAMES.contains(&n.as_str()) || (n.starts_with("docker-compose") && (n.ends_with(".yml") || n.ends_with(".yaml"))))
+        .collect();
+    names.sort();
+    names.dedup();
+    for n in names {
+        if let Ok(text) = fs::read_to_string(parent.join(&n)) {
+            let body: String = text.chars().take(8_000).collect();
+            parts.push(format!("=== {n} ===\n{body}"));
+        }
+    }
+    parts.join("\n\n")
+}
+
 /// The prompt describing every repository, with its evidence.
 pub fn system_input(repos: &[Repo]) -> String {
+    system_input_with(repos, None)
+}
+
+/// As [`system_input`], plus shared files from the folder holding the repositories.
+pub fn system_input_with(repos: &[Repo], parent: Option<&Path>) -> String {
     let names: Vec<String> = repos.iter().map(|r| r.name.clone()).collect();
     let mut blocks = Vec::new();
     for r in repos {
@@ -178,8 +222,11 @@ pub fn system_input(repos: &[Repo]) -> String {
             components = interfaces(r.result).join("\n"),
             env = section("Environment variables read", top(&sig.env)),
             hosts = section("Hosts referenced", top(&sig.hosts)),
-            mentions = section("Mentions of the other repositories", top(&sig.mentions)),
+            mentions = section("References to the other repositories as services", top(&sig.mentions)),
         ));
+    }
+    if let Some(files) = parent.map(workspace_files).filter(|f| !f.is_empty()) {
+        blocks.push(format!("<workspace_files note=\"files in the folder that holds the repositories\">\n{files}\n</workspace_files>"));
     }
     blocks.join("\n\n")
 }
@@ -191,7 +238,18 @@ pub fn system_estimate(repos: usize) -> u64 {
 /// Writes SYSTEM.md (from the cache when its inputs are unchanged).
 /// Returns the document and whether it was reused.
 pub fn system_doc(repos: &[Repo], config: &Config, store: &CacheStore, client: &dyn Llm) -> Result<(String, bool)> {
-    let user = prompts::system_user(&system_input(repos), config.lang);
+    system_doc_with(repos, None, config, store, client)
+}
+
+/// As [`system_doc`], also reading shared files from the parent folder.
+pub fn system_doc_with(
+    repos: &[Repo],
+    parent: Option<&Path>,
+    config: &Config,
+    store: &CacheStore,
+    client: &dyn Llm,
+) -> Result<(String, bool)> {
+    let user = prompts::system_user(&system_input_with(repos, parent), config.lang);
     let key = cache::key(&["system", &config.smart_model, &prompts::SYNTHESIS_SYSTEM, &user]);
     if let Some(text) = store.get(&key).and_then(|v| v.as_str().map(String::from)) {
         return Ok((text, true));

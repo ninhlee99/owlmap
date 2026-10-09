@@ -58,3 +58,33 @@ fn git_head(dir: &Path) -> Option<String> {
     let out = Command::new("git").arg("-C").arg(dir).args(["rev-parse", "HEAD"]).output().ok()?;
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
+
+/// Folders never treated as repositories when looking inside a parent folder.
+const NOT_REPOS: &[&str] = &["node_modules", "vendor", "owlmap", "owlmap-docs", "tmp", "target", "dist", "build"];
+
+/// If `dir` is not itself a git repository but holds git repositories one level
+/// down (a "project" folder such as `candidate/ company/ api/`), returns them
+/// sorted by name. Returns `None` for a repository or a plain folder.
+pub fn discover(dir: &Path) -> Option<Vec<PathBuf>> {
+    if !dir.is_dir() || is_repo(dir) {
+        return None;
+    }
+    let mut repos: Vec<PathBuf> = std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .filter(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            !name.starts_with('.') && !NOT_REPOS.contains(&name.as_str())
+        })
+        .map(|e| e.path())
+        .filter(|p| is_repo(p))
+        .collect();
+    repos.sort();
+    (!repos.is_empty()).then_some(repos)
+}
+
+/// A `.git` folder, or a `.git` file (worktrees and submodules).
+fn is_repo(dir: &Path) -> bool {
+    dir.join(".git").exists()
+}

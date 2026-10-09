@@ -753,7 +753,8 @@ fn integration_signals_find_env_hosts_and_repo_mentions() {
         ("app/clients/api_client.rb", b"BASE = ENV.fetch('COMPANY_API_URL')\nHTTP.get(\"https://api.example-corp.jp/v1/jobs\")\n"),
         ("src/config.ts", b"export const url = process.env.COMPANY_API_URL;\nconst docs = 'https://github.com/x/y';\n"),
         ("config/app.yml", b"redis: ${REDIS_URL:-redis://localhost:6379}\nsso: http://localhost:3001\n"),
-        ("app/models/job.rb", b"# synced from the company admin\nclass Job; end\n"),
+        ("app/models/job.rb", b"# every Company has jobs; a company page lists them\nclass Job; belongs_to :company; end\n"),
+        ("app/services/sync.rb", b"SSO = ENV['COMPANY_URL']\nADMIN = 'http://company:3000/admin'\n"),
         ("spec/client_spec.rb", b"ENV['TEST_ONLY_VAR']\n"),
     ]);
     let files = Scanner::new(root.path(), 100_000).scan().files;
@@ -764,12 +765,14 @@ fn integration_signals_find_env_hosts_and_repo_mentions() {
     assert!(s.hosts.contains_key("api.example-corp.jp"));
     assert!(s.hosts.contains_key("localhost:3001"));
     assert!(!s.hosts.contains_key("github.com"));
-    assert!(s.mentions["company"].contains("app/models/job.rb"));
+    let company: Vec<&str> = s.mentions["company"].iter().map(String::as_str).collect();
+    assert_eq!(company, ["app/services/sync.rb"], "model names are not service references; COMPANY_URL and //company: are");
+    assert!(!s.mentions.contains_key("api"), "the word api alone is not a reference to the api repository");
 }
 
 #[test]
 fn workspace_writes_system_overview_from_every_repo() {
-    let candidate = make_repo(&[("app/clients/jobs.rb", b"URL = ENV['JOBS_API_URL'] # talks to api\n")]);
+    let candidate = make_repo(&[("app/clients/jobs.rb", b"URL = ENV['JOBS_API_URL']\nBACKUP = 'http://api:3000'\n")]);
     let api = make_repo(&[("app/controllers/jobs_controller.rb", b"class JobsController; end\n")]);
     let out = tempfile::tempdir().unwrap();
     let config = quiet_config();
@@ -785,7 +788,7 @@ fn workspace_writes_system_overview_from_every_repo() {
     let input = owlmap::workspace::system_input(&repos);
     assert!(input.contains("<repository name=\"candidate\" docs=\"candidate/README.md\">"));
     assert!(input.contains("JOBS_API_URL"));
-    assert!(input.contains("Mentions of the other repositories:\n- api"));
+    assert!(input.contains("References to the other repositories as services:\n- api"), "{input}");
 
     let (_, reused) = owlmap::workspace::system_doc(&repos, &config, &store, &client).unwrap();
     assert!(!reused);
@@ -794,4 +797,28 @@ fn workspace_writes_system_overview_from_every_repo() {
 
     let index = owlmap::workspace::index_markdown(&repos, &config);
     assert!(index.contains("[System overview](SYSTEM.md)") && index.contains("| [api](api/README.md) |"));
+}
+
+// ---- project folders -------------------------------------------------------
+
+#[test]
+fn project_folder_expands_into_its_repositories() {
+    let project = tempfile::tempdir().unwrap();
+    for r in ["company", "api", "candidate"] {
+        fs::create_dir_all(project.path().join(r).join(".git")).unwrap();
+    }
+    fs::create_dir_all(project.path().join("docs")).unwrap(); // not a repository
+    fs::create_dir_all(project.path().join("owlmap")).unwrap(); // our own output
+    fs::create_dir_all(project.path().join(".hidden/.git")).unwrap();
+    fs::write(project.path().join("docker-compose.yml"), "services:\n  api:\n    build: ./api\n").unwrap();
+
+    let found = owlmap::repo_source::discover(project.path()).unwrap();
+    let names: Vec<String> = found.iter().map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect();
+    assert_eq!(names, ["api", "candidate", "company"]);
+
+    assert!(owlmap::repo_source::discover(&project.path().join("api")).is_none(), "a repository is not expanded");
+    assert!(owlmap::repo_source::discover(&project.path().join("docs")).is_none(), "nor is a folder without repositories");
+
+    let shared = owlmap::workspace::workspace_files(project.path());
+    assert!(shared.contains("=== docker-compose.yml ===") && shared.contains("build: ./api"));
 }

@@ -28,7 +28,8 @@ claude plugin install owlmap@owlmap
 Then, in any project:
 
 ```
-/owlmap:map                                   # map the current repository
+/owlmap:map                                   # map the current repository, or — in a folder
+                                              # holding several repos — all of them into ./owlmap
 /owlmap:map ../other-app --out docs/owlmap
 /owlmap:map https://github.com/sinatra/sinatra --lang vi
 /owlmap:map ../candidate ../company ../api --lang vi   # several repos + SYSTEM.md
