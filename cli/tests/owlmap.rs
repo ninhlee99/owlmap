@@ -7,6 +7,8 @@ use std::sync::Mutex;
 
 use anyhow::{bail, Result};
 use owlmap::analyzer::{parse_json_object, Analyzer};
+use owlmap::cache::Cache;
+use owlmap::i18n::Lang;
 use owlmap::client::{ClaudeCodeClient, Llm, Usage};
 use owlmap::config::Config;
 use owlmap::grouper::{slug, Grouper};
@@ -315,7 +317,7 @@ fn writer_writes_full_doc_set() {
 
     let mut top: Vec<_> = fs::read_dir(out.path()).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
     top.sort();
-    assert_eq!(top, ["ARCHITECTURE.md", "FLOWS.md", "ONBOARDING.md", "README.md", "modules", "owlmap.json"]);
+    assert_eq!(top, [".owlmap-cache.json", "ARCHITECTURE.md", "FLOWS.md", "ONBOARDING.md", "README.md", "modules", "owlmap.json"]);
     let mut mods: Vec<_> = fs::read_dir(out.path().join("modules")).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
     mods.sort();
     assert_eq!(mods, ["app-models.md", "lib.md"]);
@@ -430,4 +432,141 @@ fn claude_code_reports_errors() {
 #[test]
 fn claude_code_missing_binary() {
     assert!(ClaudeCodeClient::new(Some("/definitely/not/claude".into())).is_err());
+}
+
+// ---- incremental runs ------------------------------------------------------
+
+fn counts(client: &FakeClient) -> (usize, usize) {
+    let calls = client.calls.lock().unwrap();
+    let modules = calls.iter().filter(|c| c.system == *prompts::MODULE_SYSTEM).count();
+    (modules, calls.len() - modules)
+}
+
+/// Runs into `out`, carrying the cache between runs exactly as the CLI does.
+fn run_into(root: &Path, out: &Path, config: &Config, client: &FakeClient) -> owlmap::analyzer::RunResult {
+    let prev = Cache::load(out).entries;
+    let r = Analyzer::new(root, "shop", config).quiet().with_cache(prev).run(client).unwrap();
+    let info = SourceInfo { name: "shop".into(), url: None, commit: None };
+    writer::write(out, &r, &info, config, None).unwrap();
+    r
+}
+
+#[test]
+fn second_run_reuses_everything_when_nothing_changed() {
+    let root = shop();
+    let out = tempfile::tempdir().unwrap();
+    let config = quiet_config();
+
+    let first = FakeClient::default();
+    let r1 = run_into(root.path(), out.path(), &config, &first);
+    assert_eq!(counts(&first), (4, 3));
+    assert_eq!((r1.reused_modules, r1.reused_documents), (0, 0));
+
+    let second = FakeClient::default();
+    let r2 = run_into(root.path(), out.path(), &config, &second);
+    assert_eq!(counts(&second), (0, 0), "nothing changed, so nothing is sent");
+    assert_eq!((r2.reused_modules, r2.reused_documents), (4, 3));
+    assert_eq!(r1.documents, r2.documents);
+    let a = Analyzer::new(root.path(), "shop", &config).with_cache(Cache::load(out.path()).entries);
+    let plan = a.plan().unwrap();
+    assert_eq!(a.pending(&plan).estimated_input_tokens, 0, "an unchanged repo costs nothing");
+    assert_eq!(r2.summaries[0]["purpose"], "Handles things. More detail.");
+}
+
+#[test]
+fn changing_one_file_resends_only_its_module_and_the_overviews() {
+    let root = shop();
+    let out = tempfile::tempdir().unwrap();
+    let config = quiet_config();
+    run_into(root.path(), out.path(), &config, &FakeClient::default());
+
+    fs::write(root.path().join("app/models/user.rb"), "class User; has_many :orders; end\n").unwrap();
+    let client = FakeClient::default();
+    let r = run_into(root.path(), out.path(), &config, &client);
+    assert!(client.calls.lock().unwrap()[0].user.contains("Module: app/models"));
+    assert_eq!(r.reused_modules, 3);
+    // The fake returns the same summary, so the overview inputs are unchanged and reused.
+    assert_eq!(counts(&client), (1, 0));
+    assert_eq!(r.reused_documents, 3);
+
+    // A new file changes the file tree the overviews are written from.
+    fs::write(root.path().join("app/models/order.rb"), "class Order; end\n").unwrap();
+    let client = FakeClient::default();
+    run_into(root.path(), out.path(), &config, &client);
+    assert_eq!(counts(&client), (1, 3));
+
+    let pending = Analyzer::new(root.path(), "shop", &config).with_cache(Cache::load(out.path()).entries);
+    let plan = pending.plan().unwrap();
+    assert_eq!(pending.pending(&plan).cached_modules, 4, "the cache now reflects the new content");
+}
+
+#[test]
+fn changing_language_or_model_invalidates_the_cache() {
+    let root = shop();
+    let out = tempfile::tempdir().unwrap();
+    run_into(root.path(), out.path(), &quiet_config(), &FakeClient::default());
+
+    let vi = FakeClient::default();
+    run_into(root.path(), out.path(), &Config { lang: Lang::Vi, ..quiet_config() }, &vi);
+    assert_eq!(counts(&vi), (4, 3));
+
+    let other_model = FakeClient::default();
+    run_into(root.path(), out.path(), &Config { lang: Lang::Vi, fast_model: "claude-sonnet-5-5".into(), ..quiet_config() }, &other_model);
+    assert_eq!(counts(&other_model).0, 4, "module summaries depend on the fast model");
+}
+
+#[test]
+fn failed_modules_are_retried_next_time() {
+    let root = shop();
+    let out = tempfile::tempdir().unwrap();
+    let config = quiet_config();
+    let failing = FakeClient { fail_on: Some("Module: app/models".into()), ..Default::default() };
+    run_into(root.path(), out.path(), &config, &failing);
+
+    let client = FakeClient::default();
+    let r = run_into(root.path(), out.path(), &config, &client);
+    assert_eq!(counts(&client).0, 1, "only the module that failed is sent again");
+    assert!(r.failures.is_empty());
+}
+
+#[test]
+fn stale_module_notes_are_removed() {
+    let root = shop();
+    let out = tempfile::tempdir().unwrap();
+    let config = quiet_config();
+    run_into(root.path(), out.path(), &config, &FakeClient::default());
+    assert!(out.path().join("modules/app-services.md").exists());
+
+    fs::remove_dir_all(root.path().join("app/services")).unwrap();
+    run_into(root.path(), out.path(), &config, &FakeClient::default());
+    assert!(!out.path().join("modules/app-services.md").exists());
+}
+
+// ---- languages -------------------------------------------------------------
+
+#[test]
+fn language_reaches_prompts_and_labels() {
+    let root = shop();
+    let out = tempfile::tempdir().unwrap();
+    let config = Config { lang: Lang::Vi, ..quiet_config() };
+    let client = FakeClient::default();
+    run_into(root.path(), out.path(), &config, &client);
+
+    assert!(client.calls.lock().unwrap().iter().all(|c| c.user.contains("Write all prose in Vietnamese")));
+    let readme = fs::read_to_string(out.path().join("README.md")).unwrap();
+    assert!(readme.contains("Tài liệu được tạo cho") && readme.contains("| Module | Số tệp | Mục đích |"), "{readme}");
+    let note = fs::read_to_string(out.path().join("modules/app-models.md")).unwrap();
+    assert!(note.contains("## Cần cẩn thận") && note.contains("## Tệp chính"));
+    let meta: serde_json::Value = serde_json::from_str(&fs::read_to_string(out.path().join("owlmap.json")).unwrap()).unwrap();
+    assert_eq!(meta["lang"], "vi");
+
+    let ja = Config { lang: Lang::Ja, ..quiet_config() };
+    run_into(root.path(), out.path(), &ja, &FakeClient::default());
+    assert!(fs::read_to_string(out.path().join("modules/app-models.md")).unwrap().contains("## 主要ファイル"));
+}
+
+#[test]
+fn cache_keys_are_length_prefixed() {
+    assert_ne!(owlmap::cache::key(&["ab", "c"]), owlmap::cache::key(&["a", "bc"]));
+    assert_eq!(owlmap::cache::key(&["x"]).len(), 64);
 }

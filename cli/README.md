@@ -35,10 +35,36 @@ owlmap ../my-rails-app --out docs/owlmap
 ```
 
 Options: `--out DIR`, `--dry-run`, `--backend auto|api|claude-code`,
+`--lang en|vi|ja`, `--fresh`,
 `--max-files N` (default 500), `--max-input-tokens N` (default 600 000),
 `--concurrency N` (default 4, or 2 with Claude Code), `--fast-model ID`,
 `--smart-model ID`. Models can also be set with `OWLMAP_FAST_MODEL` /
 `OWLMAP_SMART_MODEL`. Run `owlmap --help` for details.
+
+## Re-running is cheap
+
+Run OwlMap again into the same `--out` folder and it only sends what changed:
+
+```
+$ owlmap ../my-app --out docs/owlmap
+Estimated input: ~12000 tokens (41 of 44 modules unchanged since the last run; ~190000 without cache)
+Summarising 3 changed modules with claude-haiku-5-5 (41 unchanged, from cache)…
+```
+
+Every Claude call is keyed by a SHA-256 of exactly what would be sent (model,
+system prompt, user prompt), stored in `<out>/.owlmap-cache.json`. Editing a
+file re-sends only its module; the overview documents are re-written only if a
+module summary, the file tree or the manifests changed. An unchanged repository
+costs nothing. Changing `--lang` or a model invalidates the affected calls
+automatically. Failed calls are never cached, so they are retried next time.
+`--fresh` ignores the cache. Commit the cache next to the docs if you want CI
+runs to be incremental too.
+
+## Languages
+
+`--lang vi` or `--lang ja` makes Claude write all prose in Vietnamese or
+Japanese, and OwlMap's own headings and labels follow. File paths, class,
+function and route names are never translated.
 
 ## Backends
 
@@ -65,7 +91,8 @@ owlmap-docs/<repo>/
 ├── FLOWS.md           # 2–4 key flows: steps + Mermaid sequence diagrams
 ├── ONBOARDING.md      # reading order, run locally, where things live, FAQ
 ├── modules/*.md       # one note per module: purpose, key files, risks…
-└── owlmap.json        # run metadata: commit, models, token usage, failures
+├── owlmap.json        # run metadata: commit, models, language, token usage, cache reuse, failures
+└── .owlmap-cache.json # makes the next run incremental
 ```
 
 ## How it works
@@ -99,7 +126,7 @@ raise `--concurrency` to shorten it.
 
 ```bash
 cd cli
-cargo test            # 23 offline tests: fake Claude client + stub `claude` executable
+cargo test            # 30 offline tests: fake Claude client + stub `claude` executable
 cargo clippy --all-targets
 cargo build --release # target/release/owlmap
 ```

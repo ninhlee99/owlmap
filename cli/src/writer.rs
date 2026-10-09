@@ -8,6 +8,8 @@ use anyhow::Result;
 use serde_json::{json, Map, Value};
 
 use crate::analyzer::RunResult;
+use crate::cache::Cache;
+use crate::i18n::Labels;
 use crate::client::Usage;
 use crate::config::Config;
 
@@ -23,18 +25,28 @@ pub fn write(out: &Path, result: &RunResult, source: &SourceInfo, config: &Confi
     for (name, text) in &result.documents {
         fs::write(out.join(name), text)?;
     }
-    for s in &result.summaries {
-        fs::write(out.join("modules").join(format!("{}.md", str_of(s, "slug"))), module_markdown(s))?;
+    let labels = config.lang.labels();
+    // Remove notes for modules that no longer exist, so the folder matches this run.
+    if let Ok(entries) = fs::read_dir(out.join("modules")) {
+        for e in entries.flatten() {
+            if e.path().extension().is_some_and(|x| x == "md") {
+                let _ = fs::remove_file(e.path());
+            }
+        }
     }
-    fs::write(out.join("README.md"), index_markdown(result, source))?;
+    for s in &result.summaries {
+        fs::write(out.join("modules").join(format!("{}.md", str_of(s, "slug"))), module_markdown(s, labels))?;
+    }
+    fs::write(out.join("README.md"), index_markdown(result, source, labels))?;
     fs::write(out.join("owlmap.json"), serde_json::to_string_pretty(&metadata(result, source, config, usage))?)?;
+    Cache::save(out, &result.cache_entries)?;
     Ok(out.to_path_buf())
 }
 
-pub fn module_markdown(s: &Map<String, Value>) -> String {
+pub fn module_markdown(s: &Map<String, Value>, l: &Labels) -> String {
     let mut out = format!("# {}\n\n", str_of(s, "module"));
     if let Some(e) = s.get("error").and_then(Value::as_str) {
-        out += &format!("OwlMap could not summarise this module: {e}\n\n");
+        out += &format!("{}: {e}\n\n", l.module_failed);
     } else if s.contains_key("parse_error") {
         out += &format!("{}\n\n", str_of(s, "notes"));
     } else {
@@ -49,29 +61,29 @@ pub fn module_markdown(s: &Map<String, Value>) -> String {
                 Some(format!("`{path}` — {}", k.get("role").and_then(Value::as_str).unwrap_or("")))
             })
             .collect();
-        out += &section("Key files", &key_files);
+        out += &section(l.key_files, &key_files);
         for (title, key) in [
-            ("Public interface", "public_interface"),
-            ("Depends on", "depends_on"),
-            ("Used by", "used_by"),
-            ("Data", "data"),
-            ("Handle with care", "risks"),
+            (l.public_interface, "public_interface"),
+            (l.depends_on, "depends_on"),
+            (l.used_by, "used_by"),
+            (l.data, "data"),
+            (l.risks, "risks"),
         ] {
             out += &section(title, &strings(s, key));
         }
         let notes = str_of(s, "notes");
         if !notes.trim().is_empty() {
-            out += &format!("## Notes\n\n{notes}\n\n");
+            out += &format!("## {}\n\n{notes}\n\n", l.notes);
         }
     }
     let files = strings(s, "files");
-    out += &format!("<details><summary>All files in this module ({})</summary>\n\n", files.len());
+    out += &format!("<details><summary>{} ({})</summary>\n\n", l.all_files, files.len());
     out += &files.iter().map(|f| format!("- `{f}`")).collect::<Vec<_>>().join("\n");
     out += "\n\n</details>\n";
     out
 }
 
-fn index_markdown(result: &RunResult, source: &SourceInfo) -> String {
+fn index_markdown(result: &RunResult, source: &SourceInfo, l: &Labels) -> String {
     let plan = &result.plan;
     let mut langs: BTreeMap<&str, usize> = BTreeMap::new();
     for f in &plan.files {
@@ -85,7 +97,7 @@ fn index_markdown(result: &RunResult, source: &SourceInfo) -> String {
         .summaries
         .iter()
         .map(|s| {
-            let purpose = if s.contains_key("error") { "_summary failed_".to_string() } else { first_sentence(&str_of(s, "purpose")) };
+            let purpose = if s.contains_key("error") { l.summary_failed.to_string() } else { first_sentence(&str_of(s, "purpose")) };
             format!(
                 "| [{}](modules/{}.md) | {} | {} |",
                 str_of(s, "module"),
@@ -100,19 +112,35 @@ fn index_markdown(result: &RunResult, source: &SourceInfo) -> String {
         Some(u) => format!("[{u}]({u})"),
         None => format!("`{}`", source.name),
     };
-    let at = source.commit.as_ref().map(|c| format!(" at commit `{}`", &c[..c.len().min(12)])).unwrap_or_default();
+    let at = source.commit.as_ref().map(|c| format!(" {} `{}`", l.at_commit, &c[..c.len().min(12)])).unwrap_or_default();
 
     format!(
-        "# {name} — OwlMap\n\nGenerated documentation for {what}{at}.\n\n\
-| Document | What it answers |\n|---|---|\n\
-| [Architecture](ARCHITECTURE.md) | How does the system fit together? |\n\
-| [Key flows](FLOWS.md) | What happens when…? |\n\
-| [Onboarding](ONBOARDING.md) | Where do I start? |\n\n\
-**{nf} files** in **{nm} modules** · {langs}\n\n## Modules\n\n| Module | Files | Purpose |\n|---|---|---|\n{rows}\n\n\
----\nWritten by OwlMap with Claude. Review before relying on it: statements marked \"Unverified:\" are inferences.\n",
+        "# {name} — OwlMap\n\n{gen} {what}{at}.\n\n\
+| {doc} | {ans} |\n|---|---|\n\
+| [{a0}](ARCHITECTURE.md) | {a1} |\n\
+| [{f0}](FLOWS.md) | {f1} |\n\
+| [{o0}](ONBOARDING.md) | {o1} |\n\n\
+**{nf} {files_in} {nm} {mods_lc}** · {langs}\n\n## {mods}\n\n| {module} | {files} | {purpose} |\n|---|---|---|\n{rows}\n\n\
+---\n{footer}\n",
         name = source.name,
+        gen = l.generated_for,
+        doc = l.document,
+        ans = l.answers,
+        a0 = l.architecture.0,
+        a1 = l.architecture.1,
+        f0 = l.flows.0,
+        f1 = l.flows.1,
+        o0 = l.onboarding.0,
+        o1 = l.onboarding.1,
         nf = plan.files.len(),
+        files_in = l.files_in,
         nm = plan.modules.len(),
+        mods_lc = l.modules.to_lowercase(),
+        mods = l.modules,
+        module = l.module,
+        files = l.files,
+        purpose = l.purpose,
+        footer = l.footer,
     )
 }
 
@@ -122,6 +150,8 @@ fn metadata(result: &RunResult, source: &SourceInfo, config: &Config, usage: Opt
         "generated_at": now_rfc3339(),
         "source": { "name": source.name, "url": source.url, "commit": source.commit },
         "models": { "fast": config.fast_model, "smart": config.smart_model },
+        "lang": config.lang.code(),
+        "reused": { "modules": result.reused_modules, "documents": result.reused_documents },
         "files": result.plan.files.len(),
         "modules": result.plan.modules.len(),
         "skipped": result.plan.skipped,

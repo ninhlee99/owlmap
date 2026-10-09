@@ -6,9 +6,11 @@
 //! [`writer`] puts the Markdown on disk.
 
 pub mod analyzer;
+pub mod cache;
 pub mod client;
 pub mod config;
 pub mod grouper;
+pub mod i18n;
 pub mod prompts;
 pub mod repo_source;
 pub mod scanner;

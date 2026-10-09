@@ -1,15 +1,17 @@
 # Kế hoạch phát triển OwlMap
 
-> Cập nhật: 08/10/2026 · Chủ dự án: Ninh Lee
+> Cập nhật: 09/10/2026 · Chủ dự án: Ninh Lee
 
 ## Tiến độ
 
-- [x] Landing page lên Vercel: https://owlmap-ninh-le-projects.vercel.app
+- [x] Landing page lên Vercel tại tên miền riêng: https://owlmap.zan.io.vn (email liên hệ: contact@zan.io.vn)
 - [x] Lõi phân tích dạng CLI (`cli/`): clone repo → lọc file → chia module → Claude tóm tắt → viết ARCHITECTURE / FLOWS / ONBOARDING / modules. Dry-run trên Sinatra: 219 file, 10 module, ~188k token đầu vào.
 - [x] Hai backend: Claude API (`ANTHROPIC_API_KEY`) và Claude Code trên máy (chỉ dùng cá nhân)
 - [x] Plugin Claude Code: lệnh `/owlmap:map`
 - [x] Chuyển CLI từ Ruby sang Rust: một file chạy ~4 MB, kết quả chia module giống hệt bản Ruby, phần xử lý cục bộ nhanh hơn 7–18 lần; 23 test offline; workflow build bản Linux/macOS/Windows khi tạo tag `v*`
-- [ ] Chạy thật lần đầu với API key, chấm chất lượng trên 3–5 repo, tinh chỉnh prompt
+- [x] CLI v0.3: chạy tăng dần (chỉ gửi lại module có thay đổi, repo không đổi thì không tốn token); `--lang en|vi|ja`; 30 test offline
+- [ ] Chạy thật lần đầu (API key hoặc Claude Code), chấm chất lượng trên 3–5 repo, tinh chỉnh prompt
+- [ ] Kết nối form đăng ký chờ trên landing (Formspree hoặc tương tự)
 - [ ] Web MVP (tuần 4)
 
 ## 1. Tóm tắt
@@ -34,7 +36,9 @@
    - `ONBOARDING.md` — đọc gì trước, chạy dự án thế nào, câu hỏi thường gặp
 5. Xem tài liệu trên web (render Markdown + Mermaid) và tải về file `.zip`.
 
-**Chưa làm (để sau MVP):** repo private (GitHub OAuth/App), tự cập nhật khi có commit mới, chat hỏi đáp về codebase, tài khoản người dùng, thanh toán, song ngữ Nhật–Việt.
+**Chưa làm (để sau MVP):** repo private (GitHub OAuth/App), tự cập nhật khi có commit mới (CLI đã có nền tảng: cache theo module), chat hỏi đáp về codebase, tài khoản người dùng, thanh toán.
+
+**Đã có sớm hơn dự kiến:** tài liệu tiếng Việt và tiếng Nhật (`--lang`).
 
 ## 3. Kiến trúc kỹ thuật đề xuất
 
@@ -122,14 +126,22 @@ Song song từ tuần 3–6: chuẩn bị và nộp hồ sơ thành lập công 
 - **Lệ phí môn bài:** đã chấm dứt thu từ 01/01/2026 (Nghị quyết 198/2025/QH15, Nghị định 362/2025/NĐ-CP).
 
 ### 6.6 Đồng bộ với chương trình Claude for Startups
-- Tên miền và email nên đứng tên công ty (chuyển chủ thể tên miền sau khi thành lập).
-- Dùng email theo tên miền khi tạo tài khoản Claude Console của công ty.
+- Tên miền và email nên đứng tên công ty (chuyển chủ thể tên miền `zan.io.vn` sau khi thành lập).
+- Dùng email theo tên miền (`contact@zan.io.vn` hoặc một hộp thư riêng `@zan.io.vn`) khi tạo tài khoản Claude Console của công ty.
 
 ## 7. Nộp đơn Claude for Startups
 
-**Điều kiện:** startup thành lập trong 5 năm gần nhất hoặc gọi vốn trong 2 năm; có tài khoản Claude Console; email công ty khớp tên miền website; mô tả ngắn sản phẩm. Không bắt buộc có vốn VC.
+> **Cập nhật 09/10/2026:** Anthropic mở rộng chương trình ngày 06/10/2026 rồi nhận *hàng trăm nghìn đơn trong vài ngày*. Trang chương trình hiện ghi là đang **vượt công suất cho ưu đãi Claude Team và 1.000 USD API credits**; ai đã nhận thì giữ nguyên; Anthropic đang thiết kế lại chương trình và **xét lại toàn bộ đơn** (trạng thái có thể thay đổi). Thời gian xét: trong vòng 1 tuần. Chưa có thông báo khi nào mở lại hai ưu đãi này.
 
-**Quyền lợi (theo trang chương trình, 10/2026):** 1 năm Claude Team miễn phí (tối đa 5 Premium seat, chỉ cho tổ chức chưa từng dùng Team), 1.000 USD API credits (hết hạn sau 6 tháng), ưu đãi đối tác, office hours, sự kiện.
+**Điều kiện:** startup thành lập trong 5 năm gần nhất hoặc gọi vốn trong 2 năm; có tài khoản Claude Console; email công ty khớp tên miền website (website `owlmap.zan.io.vn`, email `@zan.io.vn`); mô tả ngắn sản phẩm. Không bắt buộc có vốn VC.
+
+**Quyền lợi hiện còn trên trang:**
+- Claude Startup Stack: ưu đãi từ đối tác (bên thứ ba), tổng giá trị tới 45.000 USD
+- Office hours với đội Applied AI (45 phút, 2 tuần/lần), sự kiện, hackathon, meetup
+- Qua quỹ VC trong mạng lưới đối tác: thêm tới 100.000 USD API credits
+- Tạm hết suất: 1 năm Claude Team miễn phí (5 Premium seat) và 1.000 USD API credits
+
+**Chiến lược:** không phụ thuộc vào ưu đãi này. Tiếp tục làm MVP và có người dùng thử thật (dùng Claude Code cá nhân cho giai đoạn phát triển), theo dõi trang chương trình, nộp đơn khi chương trình ổn định lại. Đơn có sản phẩm chạy được và người dùng thật có lợi trong đợt xét lại, vì Anthropic nói muốn chương trình "of, by and for startup founders".
 
 **Checklist trước khi nộp**
 - [ ] Landing page có nội dung thật, demo video, mô tả rõ vai trò của Claude
@@ -147,13 +159,15 @@ Song song từ tuần 3–6: chuẩn bị và nộp hồ sơ thành lập công 
 |---|---|
 | Xung đột với hợp đồng lao động hiện tại | Đọc kỹ hợp đồng trước khi bắt đầu; làm ngoài giờ, trên thiết bị và tài khoản cá nhân; không dùng code/dữ liệu của công ty |
 | Chất lượng tài liệu chưa đủ tốt | Bộ kiểm thử repo cố định, so sánh trước/sau mỗi lần đổi prompt |
-| Chi phí API vượt dự tính | Trần token mỗi repo, giới hạn chi tiêu trong Console, cache |
+| Chi phí API vượt dự tính | Trần token mỗi repo, giới hạn chi tiêu trong Console; cache theo module (đã làm) |
 | Đối thủ lớn (công cụ tài liệu AI khác) | Tập trung ngách: dự án bàn giao, team offshore, tài liệu song ngữ về sau |
 | Khách ngại đưa code lên dịch vụ ngoài | MVP chỉ repo public; về sau cân nhắc bản tự host |
 
 ## 9. Việc cần làm ngay tuần này
 - [ ] Đọc hợp đồng lao động
-- [ ] Mua tên miền (ví dụ `owlmap.dev` hoặc `owlmap.io.vn` — tra xem còn trống)
-- [ ] Tạo email theo tên miền
-- [ ] Đẩy repo này lên GitHub, bật GitHub Pages cho thư mục `landing/`
-- [ ] Kết nối form đăng ký chờ (xem `README.md`)
+- [x] Tên miền: `owlmap.zan.io.vn`
+- [x] Email theo tên miền: `contact@zan.io.vn`
+- [x] Đẩy repo lên GitHub; landing chạy trên Vercel
+- [ ] Kiểm tra hộp thư `contact@zan.io.vn` nhận được thư (form đăng ký đang mở thư nháp gửi về địa chỉ này)
+- [ ] Kết nối form đăng ký chờ với Formspree (xem `README.md`)
+- [ ] Chạy `/owlmap:map` hoặc `owlmap` trên 3 repo, ghi lại chỗ tài liệu sai/thiếu

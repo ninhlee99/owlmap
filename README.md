@@ -2,7 +2,7 @@
 
 **Turn undocumented codebases into a navigable map.** OwlMap reads a repository with Claude and writes an architecture overview, flow diagrams, per-module notes and an onboarding guide.
 
-> Status: pre-MVP. Landing page is live at https://owlmap-ninh-le-projects.vercel.app and the analysis CLI (Rust, single binary) works end to end (tested offline; first live run pending).
+> Status: pre-MVP. Landing page is live at https://owlmap.zan.io.vn and the analysis CLI (Rust, single binary) works end to end (tested offline; first live run pending).
 
 ## Repository layout
 
@@ -11,7 +11,7 @@ owlmap/
 ├── .claude-plugin/      # This repo is a Claude Code plugin marketplace
 ├── plugins/owlmap/      # Claude Code plugin: the /owlmap:map skill
 ├── cli/                 # Analysis core in Rust: repo → Markdown docs via Claude (see cli/README.md)
-├── landing/index.html   # Static landing page (EN/VI), deployed on Vercel
+├── landing/index.html   # Static landing page (EN/VI), live at owlmap.zan.io.vn (Vercel)
 ├── docs/PLAN.md         # Product, MVP scope, roadmap, business registration, startup program
 └── README.md
 ```
@@ -59,15 +59,12 @@ cd landing && python3 -m http.server 8000
 | Constant | What to set |
 |---|---|
 | `FORM_ENDPOINT` | A form backend URL, e.g. a free [Formspree](https://formspree.io) form (`https://formspree.io/f/xxxx`). While empty, the sign-up form opens an email draft instead. |
-| `CONTACT_EMAIL` | Your domain email once it exists (currently the placeholder `hello@owlmap.dev`). |
+| `CONTACT_EMAIL` | Where sign-ups and the footer link go (currently `contact@zan.io.vn`). |
 
-**Deploy with GitHub Pages**
+**Where it is deployed**
 
-1. Repository → *Settings* → *Pages* → *Source*: **GitHub Actions**.
-2. Push to `main`. The included workflow `.github/workflows/pages.yml` publishes the `landing/` folder.
-3. To use your own domain, add it under *Custom domain* and create the DNS record your registrar shows.
-
-> GitHub Pages on a **private** repository needs a paid GitHub plan. Alternatives: make the repo public, or deploy `landing/` on Vercel/Netlify/Cloudflare Pages (free tiers support private repos).
+- Vercel project `owlmap` (team *Ninh Lê's projects*), custom domain **owlmap.zan.io.vn** (CNAME at Cloudflare, verified).
+- The project is not yet linked to this repository, so pushing to `main` does **not** redeploy the page. To enable automatic deploys, give the Vercel GitHub app access to `owlmap` (github.com/apps/vercel → Configure), then connect the repository in the Vercel project settings with *Root Directory* `landing`.
 
 ## Plan
 

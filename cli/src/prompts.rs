@@ -4,6 +4,8 @@
 
 use std::sync::LazyLock;
 
+use crate::i18n::Lang;
+
 const GROUNDING: &str = "\
 Ground every statement in the code you were given. Name real files, classes,
 functions and routes exactly as they appear. Never invent components,
@@ -36,8 +38,8 @@ there is nothing to say.
     )
 });
 
-pub fn module_user(module_name: &str, files_text: &str) -> String {
-    format!("Module: {module_name}\n\n{files_text}\n")
+pub fn module_user(module_name: &str, files_text: &str, lang: Lang) -> String {
+    format!("Module: {module_name}\n\n{files_text}\n\n{}\n", lang.rule())
 }
 
 pub static SYNTHESIS_SYSTEM: LazyLock<String> = LazyLock::new(|| {
@@ -89,9 +91,10 @@ Write ONBOARDING.md for a developer on their first day:
 ## Handle with care — the riskiest areas and why, drawn from module risks.
 ";
 
-pub fn synthesis_user(repo_name: &str, tree: &str, manifests: &str, modules_json: &str, task: &str) -> String {
+pub fn synthesis_user(repo_name: &str, tree: &str, manifests: &str, modules_json: &str, task: &str, lang: Lang) -> String {
     format!(
         "Repository: {repo_name}\n\n<file_tree>\n{tree}\n</file_tree>\n\n<manifests>\n{manifests}\n</manifests>\n\n\
-<module_summaries>\n{modules_json}\n</module_summaries>\n\n{task}"
+<module_summaries>\n{modules_json}\n</module_summaries>\n\n{task}\n{}\nSection headings may be translated; keep the document title line.",
+        lang.rule()
     )
 }

@@ -1,3 +1,5 @@
+use crate::i18n::Lang;
+
 /// All tunables in one place. Every value can be overridden from the CLI.
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -17,6 +19,8 @@ pub struct Config {
     pub max_input_tokens: u64,
     /// Parallel module summaries.
     pub concurrency: usize,
+    /// Language of the generated prose.
+    pub lang: Lang,
 }
 
 impl Default for Config {
@@ -30,6 +34,7 @@ impl Default for Config {
             min_module_chars: 3_000,
             max_input_tokens: 600_000,
             concurrency: 4,
+            lang: Lang::En,
         }
     }
 }

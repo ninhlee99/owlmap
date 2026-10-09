@@ -5,6 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>OwlMap</title>
 <meta name="description" content="OwlMap reads your repository and writes the architecture overview, flow diagrams, module notes and onboarding guide your team never had time to write.">
+<link rel="canonical" href="https://owlmap.zan.io.vn/">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://owlmap.zan.io.vn/">
+<meta property="og:title" content="OwlMap — see your codebase in the dark">
+<meta property="og:description" content="OwlMap reads your repository and writes the architecture overview, flow diagrams, module notes and onboarding guide your team never had time to write.">
+<meta name="twitter:card" content="summary">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,700;12..96,800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -331,7 +337,7 @@ footer { padding-block: 40px 56px; color: var(--ink-soft); font-size: 0.92rem; d
       <ol class="steps">
         <li><h3 data-i18n="s1_h">Paste a repository link</h3><p data-i18n="s1_p">Any public GitHub repository up to about 500 source files during the beta.</p></li>
         <li><h3 data-i18n="s2_h">OwlMap reads the code</h3><p data-i18n="s2_p">Claude summarises each module, then pieces together the architecture and main flows. Usually a few minutes.</p></li>
-        <li><h3 data-i18n="s3_h">Read or download the docs</h3><p data-i18n="s3_p">Browse them in OwlMap, or download Markdown files to commit next to your code.</p></li>
+        <li><h3 data-i18n="s3_h">Read or download the docs</h3><p data-i18n="s3_p">Browse them in OwlMap, or download Markdown files to commit next to your code. Written in English, Vietnamese or Japanese.</p></li>
       </ol>
     </div>
   </section>
@@ -387,7 +393,7 @@ footer { padding-block: 40px 56px; color: var(--ink-soft); font-size: 0.92rem; d
 
 <footer class="wrap">
   <span>© 2026 OwlMap</span>
-  <span><a href="mailto:hello@owlmap.dev" data-contact>hello@owlmap.dev</a></span>
+  <span><a href="mailto:contact@zan.io.vn" data-contact>contact@zan.io.vn</a></span>
 </footer>
 
 <script>
@@ -396,7 +402,7 @@ footer { padding-block: 40px 56px; color: var(--ink-soft); font-size: 0.92rem; d
    e.g. "https://formspree.io/f/xxxxabcd". While empty, the form opens an
    email draft to CONTACT_EMAIL instead.                                     */
 const FORM_ENDPOINT = "";
-const CONTACT_EMAIL = "hello@owlmap.dev";
+const CONTACT_EMAIL = "contact@zan.io.vn";
 /* ------------------------------------------------------------------------ */
 
 const I18N = {
@@ -441,7 +447,7 @@ const I18N = {
     s2_h: "OwlMap đọc code",
     s2_p: "Claude tóm tắt từng module, rồi ghép lại thành kiến trúc và các luồng chính. Thường mất vài phút.",
     s3_h: "Đọc hoặc tải tài liệu",
-    s3_p: "Xem ngay trên OwlMap, hoặc tải file Markdown về để commit cạnh code.",
+    s3_p: "Xem ngay trên OwlMap, hoặc tải file Markdown về để commit cạnh code. Viết bằng tiếng Anh, tiếng Việt hoặc tiếng Nhật.",
     who_title: "Dành cho các team phải tiếp quản code",
     w1_b: "Tech lead đón dev mới",
     w1_s: "Đưa người mới tấm bản đồ ngay ngày đầu, thay vì một tuần hỏi han.",

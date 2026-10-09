@@ -4,7 +4,9 @@ use std::process::ExitCode;
 use clap::{Parser, ValueEnum};
 use owlmap::analyzer::Analyzer;
 use owlmap::client::{ApiClient, ClaudeCodeClient, Llm};
+use owlmap::cache::Cache;
 use owlmap::config::Config;
+use owlmap::i18n::Lang;
 use owlmap::repo_source::RepoSource;
 use owlmap::writer::{self, SourceInfo};
 
@@ -23,7 +25,8 @@ enum Backend {
 #[command(
     version,
     after_help = "Examples:\n  owlmap https://github.com/sinatra/sinatra\n  owlmap ../my-rails-app --out docs/owlmap\n  \
-owlmap https://github.com/rack/rack --dry-run\n  owlmap ../my-app --backend claude-code"
+owlmap https://github.com/rack/rack --dry-run\n  owlmap ../my-app --backend claude-code\n  owlmap ../my-app --lang vi\n\n\
+Re-running into the same --out folder only sends changed modules to Claude\n(cache: <out>/.owlmap-cache.json). Use --fresh to ignore it."
 )]
 struct Args {
     /// Public GitHub URL (https://github.com/owner/repo) or a local folder
@@ -37,6 +40,12 @@ struct Args {
     /// How to reach Claude
     #[arg(long, value_enum, default_value_t = Backend::Auto)]
     backend: Backend,
+    /// Language of the generated docs (code names are never translated)
+    #[arg(long, value_enum, default_value_t = Lang::En)]
+    lang: Lang,
+    /// Ignore the cache from the previous run and re-analyse every module
+    #[arg(long)]
+    fresh: bool,
     /// Refuse repos with more source files than this
     #[arg(long, default_value_t = 500)]
     max_files: usize,
@@ -66,7 +75,8 @@ fn main() -> ExitCode {
 }
 
 fn run(args: Args) -> anyhow::Result<()> {
-    let mut config = Config { max_files: args.max_files, max_input_tokens: args.max_input_tokens, ..Config::default() };
+    let mut config =
+        Config { max_files: args.max_files, max_input_tokens: args.max_input_tokens, lang: args.lang, ..Config::default() };
     if let Some(m) = args.fast_model {
         config.fast_model = m;
     }
@@ -98,7 +108,9 @@ fn run(args: Args) -> anyhow::Result<()> {
         }
     };
 
-    let analyzer = Analyzer::new(&source.path, &source.name, &config);
+    let out = args.out.clone().unwrap_or_else(|| PathBuf::from("owlmap-docs").join(&source.name));
+    let prev = if args.fresh { Default::default() } else { Cache::load(&out).entries };
+    let analyzer = Analyzer::new(&source.path, &source.name, &config).with_cache(prev);
     let plan = analyzer.plan()?;
     let skipped = if plan.skipped.is_empty() {
         "none".to_string()
@@ -106,7 +118,18 @@ fn run(args: Args) -> anyhow::Result<()> {
         plan.skipped.iter().map(|(k, v)| format!("{v} {k}")).collect::<Vec<_>>().join(", ")
     };
     eprintln!("{} source files in {} modules (skipped: {skipped})", plan.files.len(), plan.modules.len());
-    eprintln!("Estimated input: ~{} tokens", plan.estimated_input_tokens);
+    let pending = analyzer.pending(&plan);
+    if pending.cached_modules > 0 {
+        eprintln!(
+            "Estimated input: ~{} tokens ({} of {} modules unchanged since the last run; ~{} without cache)",
+            pending.estimated_input_tokens,
+            pending.cached_modules,
+            plan.modules.len(),
+            plan.estimated_input_tokens
+        );
+    } else {
+        eprintln!("Estimated input: ~{} tokens", plan.estimated_input_tokens);
+    }
 
     let Some(client) = client else {
         for m in &plan.modules {
@@ -116,7 +139,6 @@ fn run(args: Args) -> anyhow::Result<()> {
     };
 
     let result = analyzer.run(client.as_ref())?;
-    let out = args.out.unwrap_or_else(|| PathBuf::from("owlmap-docs").join(&source.name));
     let info = SourceInfo { name: source.name.clone(), url: source.url.clone(), commit: source.commit.clone() };
     let usage = client.usage();
     writer::write(&out, &result, &info, &config, Some(usage))?;
@@ -126,6 +148,12 @@ fn run(args: Args) -> anyhow::Result<()> {
         "Usage: {} calls, {} input + {} cached + {} output tokens",
         usage.calls, usage.input_tokens, usage.cache_read_tokens, usage.output_tokens
     );
+    if result.reused_modules + result.reused_documents > 0 {
+        eprintln!(
+            "Reused from cache: {} modules, {} documents",
+            result.reused_modules, result.reused_documents
+        );
+    }
     if !result.failures.is_empty() {
         eprintln!("{} module(s) failed: {}", result.failures.len(), result.failures.join(", "));
     }
