@@ -92,6 +92,10 @@ struct Args {
     /// Model for the overview documents [default: claude-sonnet-5-5, or $OWLMAP_SMART_MODEL]
     #[arg(long)]
     smart_model: Option<String>,
+    /// In a project folder, also map git worktrees (skipped by default: they are
+    /// extra checkouts of another repository)
+    #[arg(long)]
+    include_worktrees: bool,
     /// List every module in the dry run, even for several repositories
     #[arg(short, long)]
     verbose: bool,
@@ -136,12 +140,29 @@ fn run(args: Args) -> anyhow::Result<ExitCode> {
     for t in &args.targets {
         match repo_source::discover(std::path::Path::new(t)) {
             Some(found) => {
-                let names: Vec<String> = found.iter().filter_map(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).collect();
-                eprintln!("Found {} repositories in {t}: {}", found.len(), names.join(", "));
+                let names = |v: &[PathBuf]| -> String {
+                    v.iter().filter_map(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).collect::<Vec<_>>().join(", ")
+                };
+                let mut chosen = found.repos.clone();
+                if !found.worktrees.is_empty() {
+                    if args.include_worktrees {
+                        chosen.extend(found.worktrees.iter().cloned());
+                    } else {
+                        eprintln!(
+                            "Skipping {} git worktree(s) in {t} (extra checkouts of another repository): {} — add --include-worktrees to map them too",
+                            found.worktrees.len(),
+                            names(&found.worktrees)
+                        );
+                    }
+                }
+                if chosen.is_empty() {
+                    anyhow::bail!("{t} only holds git worktrees; add --include-worktrees, or name the folders to map");
+                }
+                eprintln!("Found {} repositories in {t}: {}", chosen.len(), names(&chosen));
                 if args.targets.len() == 1 {
                     parent = Some(std::path::Path::new(t).canonicalize()?);
                 }
-                targets.extend(found.iter().map(|p| p.display().to_string()));
+                targets.extend(chosen.iter().map(|p| p.display().to_string()));
             }
             None => targets.push(t.clone()),
         }

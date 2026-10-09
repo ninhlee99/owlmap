@@ -18,7 +18,11 @@ No target means the current working directory.
   `owlmap` finds them all by itself and writes everything to **`./owlmap/`**:
   `owlmap/README.md`, `owlmap/SYSTEM.md`, and `owlmap/<repo>/` for each
   repository. A shared `docker-compose.yml`, `Makefile` or `README.md` in the
-  project folder is used as evidence for how they connect. Run `owlmap` with no
+  project folder is used as evidence for how they connect. **Git worktrees**
+  (extra checkouts of another repository, for example `api-feature/` made with
+  `git worktree add`) are skipped automatically so the same code isn't mapped
+  twice; `--include-worktrees` maps them too. To map only some repositories,
+  name them: `owlmap daijob6_api daijob6_companytools`. Run `owlmap` with no
   target and no `--out`, unless the user asks otherwise.
 - **Current folder is one repository:** docs go to `owlmap-docs/<repo>/`.
 - **Several targets given** (for example `../candidate ../company ../api`): one
@@ -71,10 +75,21 @@ Run `owlmap --version`.
 
 Running again later into the same `--out` only sends what changed.
 
-**If it is not installed**, tell the user it is a one-time install:
-- From the source repository (needs Rust and access to the private repo):
-  `cargo install --git https://github.com/ninhlee99/owlmap owlmap`
-- or download a prebuilt binary from the repository's Releases page.
+**If it is not installed**, tell the user it is a one-time install and give
+the commands for their system (check with `uname -sm`; on Windows use the
+`.exe`). With the GitHub CLI signed in (the repository is private):
+
+```bash
+# macOS, Apple Silicon (uname -sm → Darwin arm64); use owlmap-macos-x86_64 on Intel, owlmap-linux-x86_64 on Linux/WSL
+gh release download --repo ninhlee99/owlmap --pattern owlmap-macos-arm64 --output owlmap
+chmod +x owlmap && sudo mv owlmap /usr/local/bin/      # or any folder on PATH, e.g. ~/.local/bin
+owlmap --version
+```
+
+On macOS, if the first run is blocked as "unidentified developer", run
+`xattr -d com.apple.quarantine /usr/local/bin/owlmap` once.
+
+With Rust installed instead: `cargo install --git https://github.com/ninhlee99/owlmap owlmap`.
 
 Then continue with step 1 once it is installed. If they don't want to install
 it, use the fallback below, but only for small targets.

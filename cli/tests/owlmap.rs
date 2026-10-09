@@ -812,9 +812,17 @@ fn project_folder_expands_into_its_repositories() {
     fs::create_dir_all(project.path().join(".hidden/.git")).unwrap();
     fs::write(project.path().join("docker-compose.yml"), "services:\n  api:\n    build: ./api\n").unwrap();
 
+    // A worktree of api (as `git worktree add` creates it) and a submodule-style checkout.
+    fs::create_dir_all(project.path().join("api-hotfix")).unwrap();
+    fs::write(project.path().join("api-hotfix/.git"), "gitdir: /work/project/api/.git/worktrees/api-hotfix\n").unwrap();
+    fs::create_dir_all(project.path().join("shared")).unwrap();
+    fs::write(project.path().join("shared/.git"), "gitdir: ../.git/modules/shared\n").unwrap();
+
     let found = owlmap::repo_source::discover(project.path()).unwrap();
-    let names: Vec<String> = found.iter().map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect();
-    assert_eq!(names, ["api", "candidate", "company"]);
+    let names = |v: &[std::path::PathBuf]| v.iter().map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect::<Vec<_>>();
+    assert_eq!(names(&found.repos), ["api", "candidate", "company", "shared"]);
+    assert_eq!(names(&found.worktrees), ["api-hotfix"], "worktrees are reported separately, not mapped twice");
+    assert!(owlmap::repo_source::discover(&project.path().join("api-hotfix")).is_none(), "a worktree is a checkout, not a project");
 
     assert!(owlmap::repo_source::discover(&project.path().join("api")).is_none(), "a repository is not expanded");
     assert!(owlmap::repo_source::discover(&project.path().join("docs")).is_none(), "nor is a folder without repositories");

@@ -1,6 +1,6 @@
 {
   "name": "owlmap",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Turn one or more codebases into a navigable map: architecture overview, key flows with diagrams, per-module notes, an onboarding guide, and a system overview across repositories.",
   "author": {
     "name": "Ninh Lee"

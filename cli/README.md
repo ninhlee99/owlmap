@@ -10,10 +10,15 @@ Ships as a single ~4 MB binary with no runtime to install.
 
 ## Install
 
-**Prebuilt binary:** download `owlmap-<platform>` from the
-[Releases](https://github.com/ninhlee99/owlmap/releases) page (built by
-`.github/workflows/cli.yml` for every `v*` tag), make it executable and put it on
-your `PATH`.
+**Prebuilt binary** (no Rust needed): `owlmap-macos-arm64`, `owlmap-macos-x86_64`,
+`owlmap-linux-x86_64` and `owlmap-windows-x86_64.exe` are attached to every
+[release](https://github.com/ninhlee99/owlmap/releases). The repository is
+private, so download with the GitHub CLI:
+
+```bash
+gh release download --repo ninhlee99/owlmap --pattern owlmap-macos-arm64 --output owlmap
+chmod +x owlmap && sudo mv owlmap /usr/local/bin/
+```
 
 **From source** (Rust 1.80+):
 
@@ -73,7 +78,9 @@ docs/system/
 
 Run `owlmap` with no target inside a **project folder** (not itself a git
 repository) and it expands into every git repository one level down, skipping
-hidden folders and its own `owlmap/` output, and writes to `./owlmap/`.
+hidden folders and its own `owlmap/` output, and writes to `./owlmap/`. Git
+worktrees (extra checkouts of another repository's branches) are skipped so the
+same code is not mapped twice; `--include-worktrees` keeps them.
 
 The connections are grounded in evidence OwlMap extracts from the code without
 Claude:

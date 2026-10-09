@@ -62,29 +62,55 @@ fn git_head(dir: &Path) -> Option<String> {
 /// Folders never treated as repositories when looking inside a parent folder.
 const NOT_REPOS: &[&str] = &["node_modules", "vendor", "owlmap", "owlmap-docs", "tmp", "target", "dist", "build"];
 
-/// If `dir` is not itself a git repository but holds git repositories one level
-/// down (a "project" folder such as `candidate/ company/ api/`), returns them
-/// sorted by name. Returns `None` for a repository or a plain folder.
-pub fn discover(dir: &Path) -> Option<Vec<PathBuf>> {
-    if !dir.is_dir() || is_repo(dir) {
-        return None;
-    }
-    let mut repos: Vec<PathBuf> = std::fs::read_dir(dir)
-        .ok()?
-        .flatten()
-        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
-        .filter(|e| {
-            let name = e.file_name().to_string_lossy().into_owned();
-            !name.starts_with('.') && !NOT_REPOS.contains(&name.as_str())
-        })
-        .map(|e| e.path())
-        .filter(|p| is_repo(p))
-        .collect();
-    repos.sort();
-    (!repos.is_empty()).then_some(repos)
+/// Repositories found inside a project folder.
+#[derive(Debug, Default, PartialEq)]
+pub struct Discovered {
+    /// Main checkouts, sorted by name.
+    pub repos: Vec<PathBuf>,
+    /// Git worktrees: extra checkouts of another repository's branches. Mapping
+    /// them would document the same code again, so they are left out by default.
+    pub worktrees: Vec<PathBuf>,
 }
 
-/// A `.git` folder, or a `.git` file (worktrees and submodules).
-fn is_repo(dir: &Path) -> bool {
-    dir.join(".git").exists()
+/// If `dir` is not itself a git repository but holds git repositories one level
+/// down (a "project" folder such as `candidate/ company/ api/`), returns them.
+/// Returns `None` for a repository or a folder with no repositories in it.
+pub fn discover(dir: &Path) -> Option<Discovered> {
+    if !dir.is_dir() || checkout(dir).is_some() {
+        return None;
+    }
+    let mut found = Discovered::default();
+    for e in std::fs::read_dir(dir).ok()?.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if name.starts_with('.') || NOT_REPOS.contains(&name.as_str()) || !e.file_type().is_ok_and(|t| t.is_dir()) {
+            continue;
+        }
+        match checkout(&e.path()) {
+            Some(Checkout::Main) => found.repos.push(e.path()),
+            Some(Checkout::Worktree) => found.worktrees.push(e.path()),
+            None => {}
+        }
+    }
+    found.repos.sort();
+    found.worktrees.sort();
+    (!found.repos.is_empty() || !found.worktrees.is_empty()).then_some(found)
+}
+
+#[derive(Debug, PartialEq)]
+enum Checkout {
+    Main,
+    Worktree,
+}
+
+/// A `.git` folder is a main checkout. A `.git` file points elsewhere: into
+/// `…/.git/worktrees/<name>` for a worktree, or `…/.git/modules/<name>` for a
+/// submodule (treated as its own repository).
+fn checkout(dir: &Path) -> Option<Checkout> {
+    let git = dir.join(".git");
+    if git.is_dir() {
+        return Some(Checkout::Main);
+    }
+    let text = std::fs::read_to_string(&git).ok()?;
+    let target = text.lines().find_map(|l| l.strip_prefix("gitdir:"))?.trim().replace('\\', "/");
+    Some(if target.contains("/worktrees/") { Checkout::Worktree } else { Checkout::Main })
 }
